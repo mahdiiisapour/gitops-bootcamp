@@ -1,0 +1,14 @@
+ingress:
+  enabled: true
+
+  annotations: {}
+
+  labels: {}
+  path: /
+  pathType: Prefix
+
+  hosts:
+    - grafana.helldiverslab.uk
+  extraPaths: []
+
+                                                 
