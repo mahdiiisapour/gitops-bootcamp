@@ -1,0 +1,73 @@
+deploymentMode: SingleBinary
+
+loki:
+  useTestSchema: true
+  auth_enabled: false
+  storage:
+    bucketNames:
+      chunks: chunks
+      ruler: ruler
+  containerSecurityContext:
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+    allowPrivilegeEscalation: false
+  config: |
+    auth_enabled: false
+    server:
+      http_listen_port: 3100
+    common:
+      path_prefix: /var/loki
+      storage:
+        filesystem:
+          chunks_directory: /var/loki/chunks
+          rules_directory: /var/loki/rules
+    ingester:
+      wal:
+        enabled: false
+    ruler:
+      storage:
+        type: local
+        local:
+          directory: /var/loki/rules
+      rule_path: /var/loki/rules
+    limits_config:
+      retention_period: 720h
+      allow_structured_metadata: false
+
+singleBinary:
+  replicas: 1
+  persistence:
+    enabled: true
+    storageClass: hcloud-volumes
+    size: 10Gi
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "512Mi"
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+
+gateway:
+  enabled: true
+  replicas: 1
+
+write:
+  replicas: 0
+
+read:
+  replicas: 0
+
+backend:
+  replicas: 0
+
+memcached:
+  enabled: false
+
+resultsCache:
+  enabled: false
+
+chunksCache:
+  enabled: false

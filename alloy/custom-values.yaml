@@ -1,0 +1,142 @@
+# alloy-values.yaml - customize values below
+replicaCount: 2
+
+image:
+  # pin a stable alloy image if you want (optional)
+  repository: grafana/alloy
+  tag: "latest" # replace with a specific image tag for production
+
+serviceAccount:
+  create: true
+  name: alloy-sa
+
+podAnnotations:
+  # optional: annotation for APM
+  cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+
+resources:
+  requests:
+    cpu: "250m"
+    memory: "512Mi"
+  limits:
+    cpu: "1000m"
+    memory: "2Gi"
+
+# Liveness / readiness probes (tweak if needed)
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: 13133
+  initialDelaySeconds: 10
+  periodSeconds: 10
+
+livenessProbe:
+  httpGet:
+    path: /live
+    port: 13133
+  initialDelaySeconds: 30
+  periodSeconds: 20
+
+# Alloy configuration (OpenTelemetry Collector style + alloy components)
+# This config receives OTLP and Prometheus scraping, and exports:
+# - Logs -> Loki (OTLP/HTTP or native)
+# - Metrics -> Mimir (Prometheus remote_write)
+# - Traces -> logging (change to tempo/tempo-compatible exporter if desired)
+alloyConfig: |
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+        http:
+    prometheus:
+      config:
+        scrape_configs:
+          # example: scrape kube-state-metrics if available
+          - job_name: 'alloy-self'
+            static_configs:
+              - targets: ['localhost:8888']
+
+  processors:
+    batch:
+      timeout: 10s
+      send_batch_max_size: 1024
+
+  exporters:
+    # Loki: use OTLP/HTTP exporter to Loki's OTLP endpoint OR use a grafana-specific exporter depending on Loki version
+    otlphttp/loki:
+      endpoint: "http://loki.observability.svc.cluster.local:3100/v1/logs"
+      # If Loki requires auth header, put it here via a secretRef (example uses a header from a secret)
+      headers:
+        Authorization: "Bearer ${LOKI_TOKEN}"
+
+    # Prometheus remote_write to Mimir (query-frontend or distributor remote-write endpoint)
+    prometheusremotewrite/mimir:
+      endpoint: "http://mimir-distributor.observability.svc.cluster.local:9009/api/v1/push"
+      # optional: send a bearer token (if your Mimir requires it)
+      headers:
+        Authorization: "Bearer ${MIMIR_TOKEN}"
+      timeout: 30s
+
+    logging:
+      logLevel: info
+
+  service:
+    pipelines:
+      metrics:
+        receivers: [prometheus, otlp]
+        processors: [batch]
+        exporters: [prometheusremotewrite/mimir]
+      logs:
+        receivers: [otlp]
+        processors: [batch]
+        exporters: [otlphttp/loki]
+      traces:
+        receivers: [otlp]
+        processors: [batch]
+        exporters: [logging]
+
+# Environment variables available in the alloy Pod.
+# We map secret values into env here; these are referenced in the alloyConfig using ${VAR}
+env:
+  - name: LOKI_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: alloy-remote-credentials
+        key: LOKI_TOKEN
+  - name: MIMIR_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: alloy-remote-credentials
+        key: MIMIR_TOKEN
+
+# Service exposure
+service:
+  type: ClusterIP
+  port: 4317   # OTLP gRPC
+  port_http: 4318 # OTLP HTTP
+
+# Optionally enable Prometheus scraping on alloy itself
+prometheus:
+  enabled: true
+  serviceMonitor:
+    enabled: false
+
+# RBAC (if you want to grant Alloy read access to the kube API for Kubernetes discovery)
+rbac:
+  create: true
+  rules:
+    - apiGroups: [""]
+      resources: ["pods", "namespaces", "endpoints"]
+      verbs: ["get","list","watch"]
+
+# Pod security / tolerations and nodeSelector - tweak for your cluster policies
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Extra volumes (e.g. mount TLS certs) - example shows mounting a secret with CA if you need TLS to Loki/Mimir
+extraVolumeMounts: []
+extraVolumes: []
+
+# Logging level (debug / info / warn / error)
+logLevel: info
