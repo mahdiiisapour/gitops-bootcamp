@@ -13,28 +13,20 @@ loki:
       drop:
         - ALL
     allowPrivilegeEscalation: false
-  config: |
-    auth_enabled: false
-    server:
-      http_listen_port: 3100
-    common:
-      path_prefix: /var/loki
-      storage:
-        filesystem:
-          chunks_directory: /var/loki/chunks
-          rules_directory: /var/loki/rules
-    ingester:
-      wal:
-        enabled: false
-    ruler:
-      storage:
-        type: local
-        local:
-          directory: /var/loki/rules
-      rule_path: /var/loki/rules
-    limits_config:
-      retention_period: 720h
-      allow_structured_metadata: false
+  # Remove the custom config block entirely - let the chart template handle schema config
+  # The chart will automatically use testSchemaConfig when useTestSchema: true
+  
+  # If you need custom server config, use the structured approach instead:
+  server:
+    http_listen_port: 3100
+  
+  ingester:
+    wal:
+      enabled: false
+  
+  limits_config:
+    retention_period: 720h
+    allow_structured_metadata: false
 
 singleBinary:
   replicas: 1
