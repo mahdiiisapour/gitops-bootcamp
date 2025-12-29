@@ -1,14 +1,30 @@
 ingress:
   enabled: true
-
-  annotations: {}
-
+  ingressClassName: traefik
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
   labels: {}
   path: /
   pathType: Prefix
-
   hosts:
     - grafana.helldiverslab.uk
+  tls:
+    - hosts:
+        - grafana.helldiverslab.uk
+      secretName: wildcard-helldiverslab-tls
   extraPaths: []
+
+# ingress:
+#   enabled: true
+
+#   annotations: {}
+
+#   labels: {}
+#   path: /
+#   pathType: Prefix
+
+#   hosts:
+#     - grafana.helldiverslab.uk
+#   extraPaths: []
 
                                                  
