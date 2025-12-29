@@ -1,3 +1,6 @@
+
+adminUser: admin
+adminPassword: helldiverslab123!
 ingress:
   enabled: true
   ingressClassName: traefik
