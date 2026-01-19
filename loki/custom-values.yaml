@@ -1,7 +1,6 @@
 deploymentMode: SingleBinary
 
 loki:
-  useTestSchema: true
   auth_enabled: false
   storage:
     bucketNames:
@@ -13,6 +12,17 @@ loki:
       drop:
         - ALL
     allowPrivilegeEscalation: false
+  
+  # Schema configuration for proper label handling
+  schemaConfig:
+    configs:
+      - from: 2024-01-01
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: index_
+          period: 24h
   
   server:
     http_listen_port: 3100

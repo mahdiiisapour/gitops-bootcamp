@@ -69,37 +69,10 @@ alloyConfig: |
   // Read pod logs from Kubernetes
   loki.source.kubernetes "pods" {
     targets    = discovery.relabel.pod_logs.output
-    forward_to = [loki.process.logs.receiver]
-  }
-
-  // Process logs: add labels and parse JSON
-  loki.process "logs" {
-    // Add static labels
-    stage.labels {
-      values = {
-        job       = "kubernetes-pods",
-        cluster   = "default",
-      }
-    }
-    
-    // Parse JSON logs if present
-    stage.json {
-      expressions = {
-        level   = "level",
-        service = "service",
-        message = "message",
-      }
-    }
-    
-    // Extract level as label
-    stage.label_drop {
-      values = ["filename"]
-    }
-    
     forward_to = [loki.write.loki.receiver]
   }
 
-  // Send logs to Loki
+  // Send logs to Loki with labels from discovery
   loki.write "loki" {
     endpoint {
       url = "http://loki.observability.svc.cluster.local:3100/loki/api/v1/push"
