@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: log-generator
+  labels:
+    app: log-generator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: log-generator
+  template:
+    metadata:
+      labels:
+        app: log-generator
+    spec:
+      containers:
+      - name: log-generator
+        image: mingrammer/flog:0.4.3
+        args:
+          - --loop
+          - --format=json
+          - --number=10
+          - --delay=1s
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: log-generator-script
+data:
+  generate-logs.sh: |
+    #!/bin/sh
+    while true; do
+      LEVEL=$(shuf -n 1 -e INFO WARN ERROR DEBUG)
+      SERVICE=$(shuf -n 1 -e auth-service user-service payment-service notification-service)
+      MESSAGE=$(shuf -n 1 -e "Request processed successfully" "Database connection established" "Cache miss" "API call completed" "User authentication failed" "Invalid token" "Service unavailable" "Timeout occurred")
+      
+      echo "{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)\",\"level\":\"$LEVEL\",\"service\":\"$SERVICE\",\"message\":\"$MESSAGE\",\"request_id\":\"$(uuidgen)\"}"
+      
+      sleep $(shuf -i 1-5 -n 1)
+    done
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: custom-log-generator
+  labels:
+    app: custom-log-generator
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: custom-log-generator
+  template:
+    metadata:
+      labels:
+        app: custom-log-generator
+        environment: testing
+    spec:
+      containers:
+      - name: log-generator
+        image: busybox:latest
+        command: ["/bin/sh"]
+        args: ["/scripts/generate-logs.sh"]
+        volumeMounts:
+        - name: script
+          mountPath: /scripts
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "50m"
+          limits:
+            memory: "64Mi"
+            cpu: "100m"
+      volumes:
+      - name: script
+        configMap:
+          name: log-generator-script
+          defaultMode: 0755
