@@ -43,43 +43,61 @@ livenessProbe:
 # - Metrics -> Mimir (Prometheus remote_write)
 # - Traces -> logging (change to tempo if available)
 alloyConfig: |
-  // Discover Kubernetes pod logs
+  // ===== KUBERNETES POD LOG DISCOVERY =====
   discovery.kubernetes "pods" {
     role = "pod"
   }
 
-  // Kubernetes relabel to add labels
+  // Relabel pod metadata to useful labels
   discovery.relabel "pod_logs" {
     targets = discovery.kubernetes.pods.targets
     
     rule {
-      source_labels = ["__meta_kubernetes_namespace_name"]
-      target_label = "namespace"
+      source_labels = ["__meta_kubernetes_namespace"]
+      target_label  = "namespace"
     }
     rule {
       source_labels = ["__meta_kubernetes_pod_name"]
-      target_label = "pod"
+      target_label  = "pod"
     }
     rule {
       source_labels = ["__meta_kubernetes_pod_container_name"]
-      target_label = "container"
+      target_label  = "container"
+    }
+    rule {
+      source_labels = ["__meta_kubernetes_pod_label_app"]
+      target_label  = "app"
+    }
+    rule {
+      source_labels = ["__meta_kubernetes_pod_node_name"]
+      target_label  = "node"
+    }
+    rule {
+      source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name"]
+      separator     = "/"
+      target_label  = "job"
+    }
+  }
+
+  // Process logs and add static labels
+  loki.process "pod_logs" {
+    forward_to = [loki.write.loki.receiver]
+
+    stage.static_labels {
+      values = {
+        cluster = "production",
+        source  = "kubernetes",
+      }
     }
   }
 
   // Read pod logs from Kubernetes
   loki.source.kubernetes "pods" {
     targets    = discovery.relabel.pod_logs.output
-    forward_to = [loki.write.loki.receiver]
+    forward_to = [loki.process.pod_logs.receiver]
   }
 
-  // Send logs to Loki with labels from discovery
-  loki.write "loki" {
-    endpoint {
-      url = "http://loki.observability.svc.cluster.local:3100/loki/api/v1/push"
-    }
-  }
-
-  // Receive OTLP logs from applications
+  // ===== OTLP RECEIVER CONFIGURATION =====
   otelcol.receiver.otlp "default" {
     grpc {
       endpoint = "0.0.0.0:4317"
@@ -87,57 +105,70 @@ alloyConfig: |
     http {
       endpoint = "0.0.0.0:4318"
     }
-  }
-
-  // Batch processor for better performance
-  otelcol.processor.batch "default" {
-    send_batch_size    = 1024
-    timeout            = "10s"
-  }
-
-  // Export logs to Loki via OTLP
-  otelcol.exporter.otlphttp "loki" {
-    client {
-      endpoint = "http://loki.observability.svc.cluster.local:3100/v1/logs"
-      headers = {
-        "Authorization" = "Bearer ${LOKI_TOKEN}",
-      }
+    
+    output {
+      metrics = [otelcol.processor.batch.default.input]
+      logs    = [otelcol.processor.resource.default.input]
+      traces  = [otelcol.processor.batch.default.input]
     }
   }
 
-  // Export metrics to Mimir via Prometheus remote_write
+  // Add resource attributes processor for OTLP logs
+  otelcol.processor.resource "default" {
+    attributes {
+      action = "insert"
+      key    = "loki.format"
+      value  = "json"
+    }
+    
+    output {
+      logs = [otelcol.processor.batch.default.input]
+    }
+  }
+
+  // Batch processor for performance
+  otelcol.processor.batch "default" {
+    send_batch_size = 1024
+    timeout         = "10s"
+    
+    output {
+      metrics = [otelcol.exporter.prometheusremotewrite.mimir.input]
+      logs    = [otelcol.exporter.loki.default.input]
+      traces  = [otelcol.exporter.logging.traces.input]
+    }
+  }
+
+  // ===== EXPORTERS =====
+  // Export logs to Loki (using native Loki exporter, not OTLP)
+  otelcol.exporter.loki "default" {
+    forward_to = [loki.write.loki.receiver]
+  }
+
+  // Export metrics to Mimir
   otelcol.exporter.prometheusremotewrite "mimir" {
     endpoint = "http://mimir-distributor.observability.svc.cluster.local:9009/api/v1/push"
-    headers = {
-      "Authorization" = "Bearer ${MIMIR_TOKEN}",
-    }
+    
     resource_to_telemetry_conversion {
       enabled = true
     }
   }
 
-  // Export traces to stdout for logging (or configure Tempo if available)
+  // Export traces to stdout
   otelcol.exporter.logging "traces" {
-    loglevel = "info"
+    verbosity           = "detailed"
+    sampling_initial    = 5
+    sampling_thereafter = 200
   }
 
-  // Pipelines: route telemetry to exporters
-  otelcol.pipeline.logs "default" {
-    receivers  = ["otelcol.receiver.otlp.default"]
-    processors = ["otelcol.processor.batch.default"]
-    exporters  = ["otelcol.exporter.otlphttp.loki"]
-  }
-
-  otelcol.pipeline.metrics "default" {
-    receivers  = ["otelcol.receiver.otlp.default"]
-    processors = ["otelcol.processor.batch.default"]
-    exporters  = ["otelcol.exporter.prometheusremotewrite.mimir"]
-  }
-
-  otelcol.pipeline.traces "default" {
-    receivers  = ["otelcol.receiver.otlp.default"]
-    processors = ["otelcol.processor.batch.default"]
-    exporters  = ["otelcol.exporter.logging.traces"]
+  // ===== LOKI WRITER =====
+  loki.write "loki" {
+    endpoint {
+      url = "http://loki.observability.svc.cluster.local:3100/loki/api/v1/push"
+    }
+    
+    external_labels = {
+      cluster = "production",
+    }
   }
 
 # Environment variables available in the alloy Pod.
