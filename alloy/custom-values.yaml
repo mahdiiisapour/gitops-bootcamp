@@ -72,13 +72,30 @@ alloyConfig: |
     forward_to = [loki.process.logs.receiver]
   }
 
-  // Process logs: parse JSON if possible
+  // Process logs: add labels and parse JSON
   loki.process "logs" {
-    stage.json {
-      expressions = {
-        output = "",
+    // Add static labels
+    stage.labels {
+      values = {
+        job       = "kubernetes-pods",
+        cluster   = "default",
       }
     }
+    
+    // Parse JSON logs if present
+    stage.json {
+      expressions = {
+        level   = "level",
+        service = "service",
+        message = "message",
+      }
+    }
+    
+    // Extract level as label
+    stage.label_drop {
+      values = ["filename"]
+    }
+    
     forward_to = [loki.write.loki.receiver]
   }
 
