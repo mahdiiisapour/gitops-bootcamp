@@ -2,6 +2,30 @@
 adminUser: admin
 adminPassword: helldiverslab123!
 
+# Datasources configuration
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      # Loki datasource for logs
+      - name: Loki
+        type: loki
+        access: proxy
+        url: http://loki.observability.svc.cluster.local:3100
+        jsonData:
+          derivedFields:
+            - name: TraceID
+              matcherRegex: "traceID=(\\w+)"
+              url: $${__value.raw}
+              datasourceUid: tempo
+        isDefault: false
+      # Optional: Prometheus datasource for metrics
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus.observability.svc.cluster.local:9090
+        isDefault: true
+
 ingress:
   enabled: true
   ingressClassName: traefik
@@ -30,5 +54,3 @@ ingress:
 #   hosts:
 #     - grafana.helldiverslab.uk
 #   extraPaths: []
-
-                                                 

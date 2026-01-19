@@ -37,63 +37,95 @@ livenessProbe:
   initialDelaySeconds: 30
   periodSeconds: 20
 
-# Alloy configuration (OpenTelemetry Collector style + alloy components)
-# This config receives OTLP and Prometheus scraping, and exports:
-# - Logs -> Loki (OTLP/HTTP or native)
+# Alloy configuration (OpenTelemetry Collector + Alloy components)
+# This config receives OTLP from applications and exports:
+# - Logs -> Loki (OTLP/HTTP)
 # - Metrics -> Mimir (Prometheus remote_write)
-# - Traces -> logging (change to tempo/tempo-compatible exporter if desired)
+# - Traces -> logging (change to tempo if available)
 alloyConfig: |
-  receivers:
-    otlp:
-      protocols:
-        grpc:
-        http:
-    prometheus:
-      config:
-        scrape_configs:
-          # example: scrape kube-state-metrics if available
-          - job_name: 'alloy-self'
-            static_configs:
-              - targets: ['localhost:8888']
+  // Discover Kubernetes pod logs
+  discovery.kubernetes "pods" {
+    role = "pod"
+  }
 
-  processors:
-    batch:
-      timeout: 10s
-      send_batch_max_size: 1024
+  // Kubernetes relabel to add labels
+  discovery.relabel "pod_logs" {
+    targets = discovery.kubernetes.pods.targets
+    
+    rule {
+      source_labels = ["__meta_kubernetes_namespace_name"]
+      target_label = "namespace"
+    }
+    rule {
+      source_labels = ["__meta_kubernetes_pod_name"]
+      target_label = "pod"
+    }
+    rule {
+      source_labels = ["__meta_kubernetes_pod_container_name"]
+      target_label = "container"
+    }
+  }
 
-  exporters:
-    # Loki: use OTLP/HTTP exporter to Loki's OTLP endpoint OR use a grafana-specific exporter depending on Loki version
-    otlphttp/loki:
-      endpoint: "http://loki.observability.svc.cluster.local:3100/v1/logs"
-      # If Loki requires auth header, put it here via a secretRef (example uses a header from a secret)
-      headers:
-        Authorization: "Bearer ${LOKI_TOKEN}"
+  // Receive OTLP logs from applications
+  otelcol.receiver.otlp "default" {
+    grpc {
+      endpoint = "0.0.0.0:4317"
+    }
+    http {
+      endpoint = "0.0.0.0:4318"
+    }
+  }
 
-    # Prometheus remote_write to Mimir (query-frontend or distributor remote-write endpoint)
-    prometheusremotewrite/mimir:
-      endpoint: "http://mimir-distributor.observability.svc.cluster.local:9009/api/v1/push"
-      # optional: send a bearer token (if your Mimir requires it)
-      headers:
-        Authorization: "Bearer ${MIMIR_TOKEN}"
-      timeout: 30s
+  // Batch processor for better performance
+  otelcol.processor.batch "default" {
+    send_batch_size    = 1024
+    timeout            = "10s"
+  }
 
-    logging:
-      logLevel: info
+  // Export logs to Loki via OTLP
+  otelcol.exporter.otlphttp "loki" {
+    client {
+      endpoint = "http://loki.observability.svc.cluster.local:3100/v1/logs"
+      headers = {
+        "Authorization" = "Bearer ${LOKI_TOKEN}",
+      }
+    }
+  }
 
-  service:
-    pipelines:
-      metrics:
-        receivers: [prometheus, otlp]
-        processors: [batch]
-        exporters: [prometheusremotewrite/mimir]
-      logs:
-        receivers: [otlp]
-        processors: [batch]
-        exporters: [otlphttp/loki]
-      traces:
-        receivers: [otlp]
-        processors: [batch]
-        exporters: [logging]
+  // Export metrics to Mimir via Prometheus remote_write
+  otelcol.exporter.prometheusremotewrite "mimir" {
+    endpoint = "http://mimir-distributor.observability.svc.cluster.local:9009/api/v1/push"
+    headers = {
+      "Authorization" = "Bearer ${MIMIR_TOKEN}",
+    }
+    resource_to_telemetry_conversion {
+      enabled = true
+    }
+  }
+
+  // Export traces to stdout for logging (or configure Tempo if available)
+  otelcol.exporter.logging "traces" {
+    loglevel = "info"
+  }
+
+  // Pipelines: route telemetry to exporters
+  otelcol.pipeline.logs "default" {
+    receivers  = ["otelcol.receiver.otlp.default"]
+    processors = ["otelcol.processor.batch.default"]
+    exporters  = ["otelcol.exporter.otlphttp.loki"]
+  }
+
+  otelcol.pipeline.metrics "default" {
+    receivers  = ["otelcol.receiver.otlp.default"]
+    processors = ["otelcol.processor.batch.default"]
+    exporters  = ["otelcol.exporter.prometheusremotewrite.mimir"]
+  }
+
+  otelcol.pipeline.traces "default" {
+    receivers  = ["otelcol.receiver.otlp.default"]
+    processors = ["otelcol.processor.batch.default"]
+    exporters  = ["otelcol.exporter.logging.traces"]
+  }
 
 # Environment variables available in the alloy Pod.
 # We map secret values into env here; these are referenced in the alloyConfig using ${VAR}
