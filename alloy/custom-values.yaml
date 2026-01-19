@@ -1,5 +1,5 @@
 # alloy-values.yaml - customize values below
-replicaCount: 2
+replicaCount: 3
 
 image:
   # pin a stable alloy image if you want (optional)

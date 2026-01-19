@@ -1,0 +1,105 @@
+# mimir-values.yaml - Mimir metrics storage for Alloy
+
+deploymentMode: singleBinary
+
+mimir:
+  structuredConfig:
+    # Auth configuration
+    auth_enabled: false
+    
+    # Server configuration
+    server:
+      http_listen_port: 9009
+      log_level: info
+    
+    # Ingester configuration for metrics
+    ingester:
+      max_chunk_age: 2h
+      chunk_retain_period: 1m
+      max_streams_per_user: 10000
+    
+    # Distributor configuration
+    distributor:
+      ring:
+        kvstore:
+          store: inmemory
+    
+    # Ingestion rate limits
+    limits:
+      ingestion_rate: 100000
+      ingestion_burst_size: 200000
+      max_cache_freshness_per_query: 10m
+      max_global_series_per_user: 300000
+      max_global_exemplars_per_user: 100000
+    
+    # Storage configuration - Using local filesystem with PVC
+    blocks_storage:
+      backend: filesystem
+      filesystem:
+        dir: /mimir-storage/blocks
+      tsdb:
+        dir: /mimir-storage/tsdb
+      retention_period: 720h
+    
+    # Query configuration
+    querier:
+      max_concurrent: 20
+      worker_processes: 4
+    
+    # Query frontend for caching
+    query_frontend:
+      cache_results: true
+      max_cache_freshness_per_query: 10m
+
+# Single binary deployment configuration
+singleBinary:
+  replicas: 1
+  persistence:
+    enabled: true
+    storageClass: hcloud-volumes
+    size: 50Gi
+    mountPath: /mimir-storage
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "2Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+  
+  # Liveness and readiness probes
+  livenessProbe:
+    httpGet:
+      path: /ready
+      port: 9009
+    initialDelaySeconds: 30
+    periodSeconds: 20
+  
+  readinessProbe:
+    httpGet:
+      path: /ready
+      port: 9009
+    initialDelaySeconds: 10
+    periodSeconds: 10
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 9009
+
+# RBAC
+rbac:
+  create: true
+
+# Pod security
+podSecurityPolicy:
+  create: false
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Environment variables (not needed for filesystem storage)
+env: []
+
+# Logging
+logLevel: info
