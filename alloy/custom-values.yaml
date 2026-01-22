@@ -1,17 +1,14 @@
-# alloy-values.yaml - customize values below
 replicaCount: 3
 
 image:
-  # pin a stable alloy image if you want (optional)
   repository: grafana/alloy
-  tag: "latest" # replace with a specific image tag for production
+  tag: "v1.0.0"  # Use a specific version for production
 
 serviceAccount:
   create: true
   name: alloy-sa
 
 podAnnotations:
-  # optional: annotation for APM
   cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
 
 resources:
@@ -22,26 +19,20 @@ resources:
     cpu: "1000m"
     memory: "2Gi"
 
-# Liveness / readiness probes (tweak if needed)
 readinessProbe:
   httpGet:
     path: /ready
-    port: 13133
+    port: 12345
   initialDelaySeconds: 10
   periodSeconds: 10
 
 livenessProbe:
   httpGet:
-    path: /live
-    port: 13133
+    path: /-/healthy
+    port: 12345
   initialDelaySeconds: 30
   periodSeconds: 20
 
-# Alloy configuration (OpenTelemetry Collector + Alloy components)
-# This config receives OTLP from applications and exports:
-# - Logs -> Loki (OTLP/HTTP)
-# - Metrics -> Mimir (Prometheus remote_write)
-# - Traces -> logging (change to tempo if available)
 alloyConfig: |
   // ===== KUBERNETES POD LOG DISCOVERY =====
   discovery.kubernetes "pods" {
@@ -108,21 +99,8 @@ alloyConfig: |
     
     output {
       metrics = [otelcol.processor.batch.default.input]
-      logs    = [otelcol.processor.resource.default.input]
+      logs    = [otelcol.processor.batch.default.input]
       traces  = [otelcol.processor.batch.default.input]
-    }
-  }
-
-  // Add resource attributes processor for OTLP logs
-  otelcol.processor.resource "default" {
-    attributes {
-      action = "insert"
-      key    = "loki.format"
-      value  = "json"
-    }
-    
-    output {
-      logs = [otelcol.processor.batch.default.input]
     }
   }
 
@@ -133,37 +111,40 @@ alloyConfig: |
     
     output {
       metrics = [otelcol.exporter.prometheusremotewrite.mimir.input]
-      logs    = [otelcol.exporter.loki.default.input]
+      logs    = [otelcol.exporter.otlphttp.loki.input]
       traces  = [otelcol.exporter.logging.traces.input]
     }
   }
 
   // ===== EXPORTERS =====
-  // Export logs to Loki (using native Loki exporter, not OTLP)
-  otelcol.exporter.loki "default" {
-    forward_to = [loki.write.loki.receiver]
+  // Export logs to Loki via OTLP HTTP
+  otelcol.exporter.otlphttp "loki" {
+    client {
+      endpoint = "http://loki-gateway.observability.svc.cluster.local/otlp"
+      tls {
+        insecure = true
+      }
+    }
   }
 
   // Export metrics to Mimir
   otelcol.exporter.prometheusremotewrite "mimir" {
-    endpoint = "http://mimir-distributor.observability.svc.cluster.local:9009/api/v1/push"
-    
-    resource_to_telemetry_conversion {
-      enabled = true
+    endpoint {
+      url = "http://mimir-distributor.observability.svc.cluster.local:9009/api/v1/push"
     }
   }
 
-  // Export traces to stdout
+  // Export traces to stdout (replace with Tempo when available)
   otelcol.exporter.logging "traces" {
     verbosity           = "detailed"
     sampling_initial    = 5
     sampling_thereafter = 200
   }
 
-  // ===== LOKI WRITER =====
+  // ===== LOKI WRITER (for Kubernetes pod logs) =====
   loki.write "loki" {
     endpoint {
-      url = "http://loki.observability.svc.cluster.local:3100/loki/api/v1/push"
+      url = "http://loki-gateway.observability.svc.cluster.local/loki/api/v1/push"
     }
     
     external_labels = {
@@ -171,48 +152,33 @@ alloyConfig: |
     }
   }
 
-# Environment variables available in the alloy Pod.
-# We map secret values into env here; these are referenced in the alloyConfig using ${VAR}
-env:
-  - name: LOKI_TOKEN
-    valueFrom:
-      secretKeyRef:
-        name: alloy-remote-credentials
-        key: LOKI_TOKEN
-  - name: MIMIR_TOKEN
-    valueFrom:
-      secretKeyRef:
-        name: alloy-remote-credentials
-        key: MIMIR_TOKEN
-
 # Service exposure
 service:
   type: ClusterIP
-  port: 4317   # OTLP gRPC
-  port_http: 4318 # OTLP HTTP
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+      protocol: TCP
+    - name: http-metrics
+      port: 12345
+      targetPort: 12345
+      protocol: TCP
 
-# Optionally enable Prometheus scraping on alloy itself
-prometheus:
-  enabled: true
-  serviceMonitor:
-    enabled: false
-
-# RBAC (if you want to grant Alloy read access to the kube API for Kubernetes discovery)
+# RBAC for Kubernetes discovery
 rbac:
   create: true
   rules:
     - apiGroups: [""]
-      resources: ["pods", "namespaces", "endpoints"]
-      verbs: ["get","list","watch"]
+      resources: ["pods", "namespaces", "nodes", "services", "endpoints"]
+      verbs: ["get", "list", "watch"]
 
-# Pod security / tolerations and nodeSelector - tweak for your cluster policies
 nodeSelector: {}
 tolerations: []
 affinity: {}
 
-# Extra volumes (e.g. mount TLS certs) - example shows mounting a secret with CA if you need TLS to Loki/Mimir
-extraVolumeMounts: []
-extraVolumes: []
-
-# Logging level (debug / info / warn / error)
 logLevel: info

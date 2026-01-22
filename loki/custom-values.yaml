@@ -2,18 +2,21 @@ deploymentMode: SingleBinary
 
 loki:
   auth_enabled: false
+  
+  # CRITICAL FIX: Set replication_factor to 1 for single instance
+  commonConfig:
+    replication_factor: 1
+  
   storage:
+    type: filesystem
     bucketNames:
       chunks: chunks
       ruler: ruler
-  containerSecurityContext:
-    readOnlyRootFilesystem: false
-    capabilities:
-      drop:
-        - ALL
-    allowPrivilegeEscalation: false
+      admin: admin
+    filesystem:
+      chunks_directory: /var/loki/chunks
+      rules_directory: /var/loki/rules
   
-  # Schema configuration for proper label handling
   schemaConfig:
     configs:
       - from: 2024-01-01
@@ -26,40 +29,150 @@ loki:
   
   server:
     http_listen_port: 3100
+    grpc_listen_port: 9095
     log_level: info
   
   ingester:
     wal:
-      enabled: false
+      enabled: true
+      dir: /var/loki/wal
+      flush_on_shutdown: true
+    lifecycler:
+      ring:
+        replication_factor: 1  # CRITICAL: Must match commonConfig
+        kvstore:
+          store: inmemory
+      final_sleep: 0s
+    chunk_idle_period: 5m
+    chunk_retain_period: 30s
     max_chunk_age: 2h
   
   limits_config:
     retention_period: 720h
     allow_structured_metadata: true
     max_streams_per_user: 10000
+    max_global_streams_per_user: 10000
+    max_chunks_per_query: 2000000
+    max_query_length: 721h
+    max_query_parallelism: 32
+    max_entries_limit_per_query: 10000
+    reject_old_samples: true
+    reject_old_samples_max_age: 168h
+    ingestion_rate_mb: 10
+    ingestion_burst_size_mb: 20
+    per_stream_rate_limit: 3MB
+    per_stream_rate_limit_burst: 15MB
+    # IMPORTANT: Disable replication for single instance
+    split_queries_by_interval: 0
   
-  # Query config for better performance
   querier:
     max_concurrent: 20
+    engine:
+      timeout: 5m
+  
+  query_scheduler:
+    max_outstanding_requests_per_tenant: 2048
+  
+  frontend:
+    max_outstanding_per_tenant: 2048
+    compress_responses: true
+  
+  compactor:
+    working_directory: /var/loki/compactor
+    shared_store: filesystem
+    retention_enabled: true
+    retention_delete_delay: 2h
+    retention_delete_worker_count: 150
+    compaction_interval: 10m
+  
+  ruler:
+    storage:
+      type: local
+      local:
+        directory: /var/loki/rules
+    rule_path: /tmp/loki/rules-temp
+    ring:
+      kvstore:
+        store: inmemory
+    enable_api: true
+  
+  # Distributor config for single instance
+  distributor:
+    ring:
+      kvstore:
+        store: inmemory
 
 singleBinary:
   replicas: 1
+  
   persistence:
     enabled: true
     storageClass: hcloud-volumes
-    size: 10Gi
+    size: 20Gi
+  
   resources:
     requests:
-      cpu: "200m"
-      memory: "512Mi"
+      cpu: "500m"
+      memory: "1Gi"
     limits:
-      cpu: "1"
-      memory: "2Gi"
+      cpu: "2"
+      memory: "4Gi"
+  
+  extraEnv:
+    - name: JAEGER_AGENT_HOST
+      value: ""
+  
+  extraArgs:
+    - -config.expand-env=true
+  
+  # Add pod anti-affinity to ensure stability
+  affinity: {}
+  
+  # Readiness probe
+  readinessProbe:
+    httpGet:
+      path: /ready
+      port: http-metrics
+    initialDelaySeconds: 45
+    timeoutSeconds: 1
+    periodSeconds: 10
+    successThreshold: 1
+    failureThreshold: 3
+  
+  # Liveness probe
+  livenessProbe:
+    httpGet:
+      path: /ready
+      port: http-metrics
+    initialDelaySeconds: 45
+    timeoutSeconds: 1
+    periodSeconds: 10
+    successThreshold: 1
+    failureThreshold: 3
 
 gateway:
   enabled: true
   replicas: 1
+  
+  service:
+    type: ClusterIP
+    port: 80
+  
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "200m"
+      memory: "256Mi"
+  
+  nginxConfig:
+    httpSnippet: |-
+      client_max_body_size 10M;
+    serverSnippet: |-
+      client_max_body_size 10M;
 
+# Disable distributed components
 write:
   replicas: 0
 
@@ -69,6 +182,20 @@ read:
 backend:
   replicas: 0
 
+# Disable monitoring components that are causing issues
+monitoring:
+  selfMonitoring:
+    enabled: false
+    grafanaAgent:
+      installOperator: false
+  
+  serviceMonitor:
+    enabled: false
+  
+  lokiCanary:
+    enabled: false  # DISABLE THIS - it's what's generating all those errors
+
+# Disable caching
 memcached:
   enabled: false
 
@@ -76,4 +203,4 @@ resultsCache:
   enabled: false
 
 chunksCache:
-  enabled: false
+  ena
