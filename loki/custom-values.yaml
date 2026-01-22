@@ -80,7 +80,7 @@ loki:
   frontend:
     max_outstanding_per_tenant: 2048
   
-  # Compactor - FIXED: added delete request store for retention
+  # Compactor
   compactor:
     working_directory: /var/loki/compactor
     retention_enabled: true
@@ -115,7 +115,7 @@ singleBinary:
   extraArgs:
     - -config.expand-env=true
 
-# Gateway configuration
+# Gateway configuration - REMOVED nginxConfig completely
 gateway:
   enabled: true
   replicas: 1
@@ -134,10 +134,6 @@ gateway:
     limits:
       cpu: "200m"
       memory: "256Mi"
-  
-  nginxConfig:
-    httpSnippet: |-
-      client_max_body_size 10M;
 
 # Disable distributed components
 write:
