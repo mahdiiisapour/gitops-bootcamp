@@ -3,10 +3,11 @@ deploymentMode: SingleBinary
 loki:
   auth_enabled: false
   
-  # CRITICAL FIX: Set replication_factor to 1 for single instance
+  # CRITICAL: Set replication_factor to 1 for single instance
   commonConfig:
     replication_factor: 1
   
+  # Storage configuration
   storage:
     type: filesystem
     bucketNames:
@@ -17,6 +18,7 @@ loki:
       chunks_directory: /var/loki/chunks
       rules_directory: /var/loki/rules
   
+  # Schema configuration
   schemaConfig:
     configs:
       - from: 2024-01-01
@@ -27,11 +29,13 @@ loki:
           prefix: index_
           period: 24h
   
+  # Server configuration
   server:
     http_listen_port: 3100
     grpc_listen_port: 9095
     log_level: info
   
+  # Ingester configuration
   ingester:
     wal:
       enabled: true
@@ -39,7 +43,7 @@ loki:
       flush_on_shutdown: true
     lifecycler:
       ring:
-        replication_factor: 1  # CRITICAL: Must match commonConfig
+        replication_factor: 1
         kvstore:
           store: inmemory
       final_sleep: 0s
@@ -47,6 +51,7 @@ loki:
     chunk_retain_period: 30s
     max_chunk_age: 2h
   
+  # Limits configuration
   limits_config:
     retention_period: 720h
     allow_structured_metadata: true
@@ -62,29 +67,28 @@ loki:
     ingestion_burst_size_mb: 20
     per_stream_rate_limit: 3MB
     per_stream_rate_limit_burst: 15MB
-    # IMPORTANT: Disable replication for single instance
-    split_queries_by_interval: 0
   
+  # Querier configuration
   querier:
     max_concurrent: 20
-    engine:
-      timeout: 5m
   
+  # Query scheduler
   query_scheduler:
     max_outstanding_requests_per_tenant: 2048
   
+  # Frontend
   frontend:
     max_outstanding_per_tenant: 2048
-    compress_responses: true
   
+  # Compactor
   compactor:
     working_directory: /var/loki/compactor
     shared_store: filesystem
     retention_enabled: true
     retention_delete_delay: 2h
     retention_delete_worker_count: 150
-    compaction_interval: 10m
   
+  # Ruler
   ruler:
     storage:
       type: local
@@ -96,12 +100,13 @@ loki:
         store: inmemory
     enable_api: true
   
-  # Distributor config for single instance
+  # Distributor
   distributor:
     ring:
       kvstore:
         store: inmemory
 
+# Single binary deployment
 singleBinary:
   replicas: 1
   
@@ -118,38 +123,10 @@ singleBinary:
       cpu: "2"
       memory: "4Gi"
   
-  extraEnv:
-    - name: JAEGER_AGENT_HOST
-      value: ""
-  
   extraArgs:
     - -config.expand-env=true
-  
-  # Add pod anti-affinity to ensure stability
-  affinity: {}
-  
-  # Readiness probe
-  readinessProbe:
-    httpGet:
-      path: /ready
-      port: http-metrics
-    initialDelaySeconds: 45
-    timeoutSeconds: 1
-    periodSeconds: 10
-    successThreshold: 1
-    failureThreshold: 3
-  
-  # Liveness probe
-  livenessProbe:
-    httpGet:
-      path: /ready
-      port: http-metrics
-    initialDelaySeconds: 45
-    timeoutSeconds: 1
-    periodSeconds: 10
-    successThreshold: 1
-    failureThreshold: 3
 
+# Gateway configuration
 gateway:
   enabled: true
   replicas: 1
@@ -157,6 +134,9 @@ gateway:
   service:
     type: ClusterIP
     port: 80
+  
+  ingress:
+    enabled: false
   
   resources:
     requests:
@@ -182,7 +162,7 @@ read:
 backend:
   replicas: 0
 
-# Disable monitoring components that are causing issues
+# Disable monitoring
 monitoring:
   selfMonitoring:
     enabled: false
@@ -193,14 +173,23 @@ monitoring:
     enabled: false
   
   lokiCanary:
-    enabled: false  # DISABLE THIS - it's what's generating all those errors
+    enabled: false
 
-# Disable caching
-memcached:
+# Disable ruler (not needed for basic setup)
+ruler:
+  enabled: false
+
+# Disable caching - CORRECT FORMAT
+chunksCache:
   enabled: false
 
 resultsCache:
   enabled: false
 
-chunksCache:
-  ena
+# Disable memcached
+memcached:
+  enabled: false
+
+# Disable test
+test:
+  enabled: false
