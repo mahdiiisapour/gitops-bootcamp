@@ -2,7 +2,7 @@ replicaCount: 3
 
 image:
   repository: grafana/alloy
-  tag: "v1.0.0"  # Use a specific version for production
+  tag: "v1.0.0"
 
 serviceAccount:
   create: true
@@ -34,39 +34,111 @@ livenessProbe:
   periodSeconds: 20
 
 alloyConfig: |
-  // ===== KUBERNETES POD LOG DISCOVERY =====
+  // ===== KUBERNETES POD LOG DISCOVERY (ALL NAMESPACES) =====
   discovery.kubernetes "pods" {
     role = "pod"
+    // No namespace filter = watch ALL namespaces
   }
 
-  // Relabel pod metadata to useful labels
+  // Relabel pod metadata to create filterable labels in Grafana
   discovery.relabel "pod_logs" {
     targets = discovery.kubernetes.pods.targets
     
+    // Namespace label
     rule {
       source_labels = ["__meta_kubernetes_namespace"]
       target_label  = "namespace"
     }
+    
+    // Pod name
     rule {
       source_labels = ["__meta_kubernetes_pod_name"]
       target_label  = "pod"
     }
+    
+    // Container name
     rule {
       source_labels = ["__meta_kubernetes_pod_container_name"]
       target_label  = "container"
     }
-    rule {
-      source_labels = ["__meta_kubernetes_pod_label_app"]
-      target_label  = "app"
-    }
+    
+    // Node name
     rule {
       source_labels = ["__meta_kubernetes_pod_node_name"]
       target_label  = "node"
     }
+    
+    // App label (if exists)
+    rule {
+      source_labels = ["__meta_kubernetes_pod_label_app"]
+      target_label  = "app"
+    }
+    
+    // App.kubernetes.io/name label (if exists)
+    rule {
+      source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+      target_label  = "app_name"
+    }
+    
+    // Version label (if exists)
+    rule {
+      source_labels = ["__meta_kubernetes_pod_label_version"]
+      target_label  = "version"
+    }
+    
+    // Component label (if exists)
+    rule {
+      source_labels = ["__meta_kubernetes_pod_label_component"]
+      target_label  = "component"
+    }
+    
+    // Environment label (if exists)
+    rule {
+      source_labels = ["__meta_kubernetes_pod_label_environment"]
+      target_label  = "environment"
+    }
+    
+    // Controller type (Deployment, StatefulSet, DaemonSet, etc.)
+    rule {
+      source_labels = ["__meta_kubernetes_pod_controller_kind"]
+      target_label  = "controller_kind"
+    }
+    
+    // Controller name
+    rule {
+      source_labels = ["__meta_kubernetes_pod_controller_name"]
+      target_label  = "controller_name"
+    }
+    
+    // Job label (namespace/pod)
     rule {
       source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name"]
       separator     = "/"
       target_label  = "job"
+    }
+    
+    // Instance label (pod name)
+    rule {
+      source_labels = ["__meta_kubernetes_pod_name"]
+      target_label  = "instance"
+    }
+    
+    // Container ID
+    rule {
+      source_labels = ["__meta_kubernetes_pod_container_id"]
+      target_label  = "container_id"
+    }
+    
+    // Pod IP
+    rule {
+      source_labels = ["__meta_kubernetes_pod_ip"]
+      target_label  = "pod_ip"
+    }
+    
+    // Pod UID
+    rule {
+      source_labels = ["__meta_kubernetes_pod_uid"]
+      target_label  = "pod_uid"
     }
   }
 
@@ -74,10 +146,35 @@ alloyConfig: |
   loki.process "pod_logs" {
     forward_to = [loki.write.loki.receiver]
 
+    // Add static cluster label
     stage.static_labels {
       values = {
         cluster = "production",
         source  = "kubernetes",
+      }
+    }
+    
+    // Parse JSON logs if they exist
+    stage.json {
+      expressions = {
+        level     = "level",
+        logger    = "logger",
+        msg       = "msg",
+        timestamp = "timestamp",
+      }
+    }
+    
+    // Extract log level as a label (if present in JSON)
+    stage.labels {
+      values = {
+        level = "",
+      }
+    }
+    
+    // Extract stream (stdout/stderr) as label
+    stage.static_labels {
+      values = {
+        stream = "",
       }
     }
   }
@@ -127,7 +224,7 @@ alloyConfig: |
     }
   }
 
-  // Export metrics to Mimir
+  // Export metrics to Mimir (if you have it)
   otelcol.exporter.prometheusremotewrite "mimir" {
     endpoint {
       url = "http://mimir-distributor.observability.svc.cluster.local:9009/api/v1/push"
@@ -169,12 +266,15 @@ service:
       targetPort: 12345
       protocol: TCP
 
-# RBAC for Kubernetes discovery
+# RBAC for Kubernetes discovery - CRITICAL for all namespace access
 rbac:
   create: true
   rules:
     - apiGroups: [""]
       resources: ["pods", "namespaces", "nodes", "services", "endpoints"]
+      verbs: ["get", "list", "watch"]
+    - apiGroups: ["apps"]
+      resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
       verbs: ["get", "list", "watch"]
 
 nodeSelector: {}
