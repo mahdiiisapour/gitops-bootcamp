@@ -80,13 +80,14 @@ loki:
   frontend:
     max_outstanding_per_tenant: 2048
   
-  # Compactor - FIXED: removed invalid shared_store field
+  # Compactor - FIXED: added delete request store for retention
   compactor:
     working_directory: /var/loki/compactor
     retention_enabled: true
     retention_delete_delay: 2h
     retention_delete_worker_count: 150
     compaction_interval: 10m
+    delete_request_store: filesystem
   
   # Distributor
   distributor:
@@ -114,7 +115,7 @@ singleBinary:
   extraArgs:
     - -config.expand-env=true
 
-# Gateway configuration - FIXED: removed duplicate client_max_body_size
+# Gateway configuration
 gateway:
   enabled: true
   replicas: 1
@@ -134,7 +135,6 @@ gateway:
       cpu: "200m"
       memory: "256Mi"
   
-  # Simplified nginx config - only in ONE place
   nginxConfig:
     httpSnippet: |-
       client_max_body_size 10M;
@@ -162,7 +162,7 @@ monitoring:
   lokiCanary:
     enabled: false
 
-# Disable ruler (not needed for basic setup)
+# Disable ruler
 ruler:
   enabled: false
 
