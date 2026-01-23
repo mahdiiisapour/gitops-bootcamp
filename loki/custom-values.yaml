@@ -176,7 +176,7 @@ read:
   replicas: 0
 
 backend:
-  replicas: 1
+  replicas: 0
 
 # Disable monitoring
 monitoring:
