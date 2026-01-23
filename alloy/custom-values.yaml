@@ -1,12 +1,16 @@
 replicaCount: 1
+
 image:
   repository: grafana/alloy
   tag: "v1.0.0"
+
 serviceAccount:
   create: true
   name: alloy-sa
+
 podAnnotations:
   cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+
 resources:
   requests:
     cpu: "250m"
@@ -14,100 +18,91 @@ resources:
   limits:
     cpu: "1000m"
     memory: "2Gi"
+
 alloyConfig: |
-  // Discover all pods in the cluster
+  // ===============================
+  // Kubernetes Pod Log Collection
+  // ===============================
+
   discovery.kubernetes "pods" {
     role = "pod"
   }
-  
-  // Relabel to add metadata as labels
+
   discovery.relabel "pod_logs" {
     targets = discovery.kubernetes.pods.targets
-    
+
     // Keep only running pods
     rule {
       source_labels = ["__meta_kubernetes_pod_phase"]
       action        = "keep"
       regex         = "Running"
     }
-    
+
     // Namespace
     rule {
       source_labels = ["__meta_kubernetes_namespace"]
       target_label  = "namespace"
     }
-    
+
     // Pod
     rule {
       source_labels = ["__meta_kubernetes_pod_name"]
       target_label  = "pod"
     }
-    
+
     // Container
     rule {
       source_labels = ["__meta_kubernetes_pod_container_name"]
       target_label  = "container"
     }
-    
+
     // Node
     rule {
       source_labels = ["__meta_kubernetes_pod_node_name"]
       target_label  = "node"
     }
-    
-    // App label
+
+    // App label (if present)
     rule {
       source_labels = ["__meta_kubernetes_pod_label_app"]
       target_label  = "app"
+      action        = "replace"
     }
-    
-    // Job
+
+    // Job label
     rule {
       source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_container_name"]
       separator     = "/"
       target_label  = "job"
     }
-    
-    // Ensure __path__ is set correctly
+
+    // ✅ Correct Kubernetes container log path
     rule {
-      source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
-      separator     = "/"
+      source_labels = [
+        "__meta_kubernetes_pod_name",
+        "__meta_kubernetes_namespace",
+        "__meta_kubernetes_pod_container_name"
+      ]
+      separator     = "_"
       target_label  = "__path__"
-      replacement   = "/var/log/pods/*$1/*.log"
+      replacement   = "/var/log/containers/*$1*$2*$3*.log"
     }
   }
-  
-  // Read logs from discovered pods
+
+  // Read logs and send directly to Loki
   loki.source.kubernetes "pod_logs" {
     targets    = discovery.relabel.pod_logs.output
-    forward_to = [loki.process.add_labels.receiver]
-  }
-  
-  // Process logs to ensure labels are preserved
-  loki.process "add_labels" {
     forward_to = [loki.write.default.receiver]
-    
-    // Stage to keep all labels from discovery
-    stage.labels {
-      values = {
-        namespace = "",
-        pod       = "",
-        container = "",
-        node      = "",
-        app       = "",
-        job       = "",
-      }
-    }
   }
-  
+
   // Write to Loki
   loki.write "default" {
     endpoint {
       url = "http://loki-gateway.observability.svc.cluster.local/loki/api/v1/push"
     }
-    
+
     external_labels = {
-      cluster = "production",
+      cluster = "production"
     }
   }
 
@@ -115,312 +110,18 @@ service:
   enabled: true
   type: ClusterIP
 
-# CRITICAL: Run as DaemonSet to access node logs
 controller:
   type: "daemonset"
 
-# RBAC permissions
 rbac:
   create: true
 
-# Mount host log directories
 extraVolumes:
   - name: varlog
     hostPath:
       path: /var/log
-  - name: varlibdockercontainers
-    hostPath:
-      path: /var/lib/docker/containers
 
 extraVolumeMounts:
   - name: varlog
     mountPath: /var/log
     readOnly: true
-  - name: varlibdockercontainers
-    mountPath: /var/lib/docker/containers
-    readOnly: true
-
-# replicaCount: 3
-
-# image:
-#   repository: grafana/alloy
-#   tag: "v1.0.0"
-
-# serviceAccount:
-#   create: true
-#   name: alloy-sa
-
-# podAnnotations:
-#   cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
-
-# resources:
-#   requests:
-#     cpu: "250m"
-#     memory: "512Mi"
-#   limits:
-#     cpu: "1000m"
-#     memory: "2Gi"
-
-# readinessProbe:
-#   httpGet:
-#     path: /ready
-#     port: 12345
-#   initialDelaySeconds: 10
-#   periodSeconds: 10
-
-# livenessProbe:
-#   httpGet:
-#     path: /-/healthy
-#     port: 12345
-#   initialDelaySeconds: 30
-#   periodSeconds: 20
-
-# alloyConfig: |
-#   // ===== KUBERNETES POD LOG DISCOVERY (ALL NAMESPACES) =====
-#   discovery.kubernetes "pods" {
-#     role = "pod"
-#     // No namespace filter = watch ALL namespaces
-#   }
-
-#   // Relabel pod metadata to create filterable labels in Grafana
-#   discovery.relabel "pod_logs" {
-#     targets = discovery.kubernetes.pods.targets
-    
-#     // Namespace label
-#     rule {
-#       source_labels = ["__meta_kubernetes_namespace"]
-#       target_label  = "namespace"
-#     }
-    
-#     // Pod name
-#     rule {
-#       source_labels = ["__meta_kubernetes_pod_name"]
-#       target_label  = "pod"
-#     }
-    
-#     // Container name
-#     rule {
-#       source_labels = ["__meta_kubernetes_pod_container_name"]
-#       target_label  = "container"
-#     }
-    
-#     // Node name
-#     rule {
-#       source_labels = ["__meta_kubernetes_pod_node_name"]
-#       target_label  = "node"
-#     }
-    
-#     // App label (if exists)
-#     rule {
-#       source_labels = ["__meta_kubernetes_pod_label_app"]
-#       target_label  = "app"
-#     }
-    
-#     // App.kubernetes.io/name label (if exists)
-#     rule {
-#       source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
-#       target_label  = "app_name"
-#     }
-    
-#     // Version label (if exists)
-#     rule {
-#       source_labels = ["__meta_kubernetes_pod_label_version"]
-#       target_label  = "version"
-#     }
-    
-#     // Component label (if exists)
-#     rule {
-#       source_labels = ["__meta_kubernetes_pod_label_component"]
-#       target_label  = "component"
-#     }
-    
-#     // Environment label (if exists)
-#     rule {
-#       source_labels = ["__meta_kubernetes_pod_label_environment"]
-#       target_label  = "environment"
-#     }
-    
-#     // Controller type (Deployment, StatefulSet, DaemonSet, etc.)
-#     rule {
-#       source_labels = ["__meta_kubernetes_pod_controller_kind"]
-#       target_label  = "controller_kind"
-#     }
-    
-#     // Controller name
-#     rule {
-#       source_labels = ["__meta_kubernetes_pod_controller_name"]
-#       target_label  = "controller_name"
-#     }
-    
-#     // Job label (namespace/pod)
-#     rule {
-#       source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name"]
-#       separator     = "/"
-#       target_label  = "job"
-#     }
-    
-#     // Instance label (pod name)
-#     rule {
-#       source_labels = ["__meta_kubernetes_pod_name"]
-#       target_label  = "instance"
-#     }
-    
-#     // Container ID
-#     rule {
-#       source_labels = ["__meta_kubernetes_pod_container_id"]
-#       target_label  = "container_id"
-#     }
-    
-#     // Pod IP
-#     rule {
-#       source_labels = ["__meta_kubernetes_pod_ip"]
-#       target_label  = "pod_ip"
-#     }
-    
-#     // Pod UID
-#     rule {
-#       source_labels = ["__meta_kubernetes_pod_uid"]
-#       target_label  = "pod_uid"
-#     }
-#   }
-
-#   // Process logs and add static labels
-#   loki.process "pod_logs" {
-#     forward_to = [loki.write.loki.receiver]
-
-#     // Add static cluster label
-#     stage.static_labels {
-#       values = {
-#         cluster = "production",
-#         source  = "kubernetes",
-#       }
-#     }
-    
-#     // Parse JSON logs if they exist
-#     stage.json {
-#       expressions = {
-#         level     = "level",
-#         logger    = "logger",
-#         msg       = "msg",
-#         timestamp = "timestamp",
-#       }
-#     }
-    
-#     // Extract log level as a label (if present in JSON)
-#     stage.labels {
-#       values = {
-#         level = "",
-#       }
-#     }
-    
-#     // Extract stream (stdout/stderr) as label
-#     stage.static_labels {
-#       values = {
-#         stream = "",
-#       }
-#     }
-#   }
-
-#   // Read pod logs from Kubernetes
-#   loki.source.kubernetes "pods" {
-#     targets    = discovery.relabel.pod_logs.output
-#     forward_to = [loki.process.pod_logs.receiver]
-#   }
-
-#   // ===== OTLP RECEIVER CONFIGURATION =====
-#   otelcol.receiver.otlp "default" {
-#     grpc {
-#       endpoint = "0.0.0.0:4317"
-#     }
-#     http {
-#       endpoint = "0.0.0.0:4318"
-#     }
-    
-#     output {
-#       metrics = [otelcol.processor.batch.default.input]
-#       logs    = [otelcol.processor.batch.default.input]
-#       traces  = [otelcol.processor.batch.default.input]
-#     }
-#   }
-
-#   // Batch processor for performance
-#   otelcol.processor.batch "default" {
-#     send_batch_size = 1024
-#     timeout         = "10s"
-    
-#     output {
-#       metrics = [otelcol.exporter.prometheusremotewrite.mimir.input]
-#       logs    = [otelcol.exporter.otlphttp.loki.input]
-#       traces  = [otelcol.exporter.logging.traces.input]
-#     }
-#   }
-
-#   // ===== EXPORTERS =====
-#   // Export logs to Loki via OTLP HTTP
-#   otelcol.exporter.otlphttp "loki" {
-#     client {
-#       endpoint = "http://loki-gateway.observability.svc.cluster.local/otlp"
-#       tls {
-#         insecure = true
-#       }
-#     }
-#   }
-
-#   // Export metrics to Mimir (if you have it)
-#   otelcol.exporter.prometheusremotewrite "mimir" {
-#     endpoint {
-#       url = "http://mimir-distributor.observability.svc.cluster.local:9009/api/v1/push"
-#     }
-#   }
-
-#   // Export traces to stdout (replace with Tempo when available)
-#   otelcol.exporter.logging "traces" {
-#     verbosity           = "detailed"
-#     sampling_initial    = 5
-#     sampling_thereafter = 200
-#   }
-
-#   // ===== LOKI WRITER (for Kubernetes pod logs) =====
-#   loki.write "loki" {
-#     endpoint {
-#       url = "http://loki-gateway.observability.svc.cluster.local/loki/api/v1/push"
-#     }
-    
-#     external_labels = {
-#       cluster = "production",
-#     }
-#   }
-
-# # Service exposure
-# service:
-#   type: ClusterIP
-#   ports:
-#     - name: otlp-grpc
-#       port: 4317
-#       targetPort: 4317
-#       protocol: TCP
-#     - name: otlp-http
-#       port: 4318
-#       targetPort: 4318
-#       protocol: TCP
-#     - name: http-metrics
-#       port: 12345
-#       targetPort: 12345
-#       protocol: TCP
-
-# # RBAC for Kubernetes discovery - CRITICAL for all namespace access
-# rbac:
-#   create: true
-#   rules:
-#     - apiGroups: [""]
-#       resources: ["pods", "namespaces", "nodes", "services", "endpoints"]
-#       verbs: ["get", "list", "watch"]
-#     - apiGroups: ["apps"]
-#       resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
-#       verbs: ["get", "list", "watch"]
-
-# nodeSelector: {}
-# tolerations: []
-# affinity: {}
-
-# logLevel: info
