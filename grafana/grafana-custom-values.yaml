@@ -1,4 +1,3 @@
-
 adminUser: admin
 adminPassword: helldiverslab123!
 
@@ -11,14 +10,20 @@ datasources:
       - name: Loki
         type: loki
         access: proxy
-        url: http://loki.observability.svc.cluster.local:3100
+        # FIXED: Use the gateway service (not direct loki service)
+        url: http://loki-gateway.observability.svc.cluster.local
         jsonData:
+          # Enable all label options
+          maxLines: 1000
+          timeout: 60
+          # Derived fields for trace correlation
           derivedFields:
             - name: TraceID
               matcherRegex: "traceID=(\\w+)"
               url: $${__value.raw}
               datasourceUid: tempo
         isDefault: false
+        
       # Optional: Prometheus datasource for metrics
       - name: Prometheus
         type: prometheus
@@ -41,16 +46,3 @@ ingress:
         - grafana.helldiverslab.uk
       secretName: wildcard-helldiverslab-tls
   extraPaths: []
-
-# ingress:
-#   enabled: true
-
-#   annotations: {}
-
-#   labels: {}
-#   path: /
-#   pathType: Prefix
-
-#   hosts:
-#     - grafana.helldiverslab.uk
-#   extraPaths: []

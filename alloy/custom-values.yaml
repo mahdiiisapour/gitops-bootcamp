@@ -1,16 +1,12 @@
 replicaCount: 1
-
 image:
   repository: grafana/alloy
   tag: "v1.0.0"
-
 serviceAccount:
   create: true
   name: alloy-sa
-
 podAnnotations:
   cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
-
 resources:
   requests:
     cpu: "250m"
@@ -18,96 +14,99 @@ resources:
   limits:
     cpu: "1000m"
     memory: "2Gi"
-
 alloyConfig: |
   // ===============================
   // Kubernetes Pod Log Collection
   // ===============================
-
   discovery.kubernetes "pods" {
     role = "pod"
   }
-
+  
   discovery.relabel "pod_logs" {
     targets = discovery.kubernetes.pods.targets
-
+    
     // Keep only running pods
     rule {
       source_labels = ["__meta_kubernetes_pod_phase"]
       action        = "keep"
       regex         = "Running"
     }
-
-    // Namespace
+    
+    // Namespace - CRITICAL: Must be a stream label
     rule {
       source_labels = ["__meta_kubernetes_namespace"]
       target_label  = "namespace"
     }
-
+    
     // Pod
     rule {
       source_labels = ["__meta_kubernetes_pod_name"]
       target_label  = "pod"
     }
-
+    
     // Container
     rule {
       source_labels = ["__meta_kubernetes_pod_container_name"]
       target_label  = "container"
     }
-
+    
     // Node
     rule {
       source_labels = ["__meta_kubernetes_pod_node_name"]
       target_label  = "node"
     }
-
+    
     // App label (if present)
     rule {
       source_labels = ["__meta_kubernetes_pod_label_app"]
       target_label  = "app"
       action        = "replace"
+      regex         = "(.+)"
     }
-
-    // Service name (if present)
-    rule {
-      source_labels = ["__meta_kubernetes_pod_label_app"]
-      target_label  = "service_name"
-      action        = "replace"
-    }
-
-    // Job label
+    
+    // Job label - combine namespace and container
     rule {
       source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_container_name"]
       separator     = "/"
       target_label  = "job"
     }
-
+    
     // Kubernetes container log path
     rule {
-      source_labels = [
-        "__meta_kubernetes_pod_name",
-        "__meta_kubernetes_namespace",
-        "__meta_kubernetes_pod_container_name"
-      ]
-      separator     = "_"
+      source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+      separator     = "/"
       target_label  = "__path__"
-      replacement   = "/var/log/containers/*$1*$2*$3*.log"
+      replacement   = "/var/log/pods/*$1/$2/*.log"
     }
   }
-
-  // 🔑 FILE-BASED log scraping (required for labels)
+  
+  // Process stage to add labels from log line if needed
+  loki.process "pod_logs" {
+    forward_to = [loki.write.default.receiver]
+    
+    // Add stages here if you need to extract additional labels from log content
+    stage.static_labels {
+      values = {
+        source = "kubernetes",
+      }
+    }
+  }
+  
+  // File-based log scraping
   loki.source.file "pod_logs" {
     targets    = discovery.relabel.pod_logs.output
-    forward_to = [loki.write.default.receiver]
+    forward_to = [loki.process.pod_logs.receiver]
   }
-
+  
   // Write to Loki
   loki.write "default" {
     endpoint {
       url = "http://loki-gateway.observability.svc.cluster.local/loki/api/v1/push"
+      
+      // Add timeout and retry configuration
+      timeout = "30s"
     }
-
+    
     external_labels = {
       cluster = "production"
     }
@@ -116,19 +115,21 @@ alloyConfig: |
 service:
   enabled: true
   type: ClusterIP
-
 controller:
   type: "daemonset"
-
 rbac:
   create: true
-
 extraVolumes:
   - name: varlog
     hostPath:
       path: /var/log
-
+  - name: varlibdockercontainers
+    hostPath:
+      path: /var/lib/docker/containers
 extraVolumeMounts:
   - name: varlog
     mountPath: /var/log
+    readOnly: true
+  - name: varlibdockercontainers
+    mountPath: /var/lib/docker/containers
     readOnly: true
