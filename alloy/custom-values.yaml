@@ -1,12 +1,25 @@
-replicaCount: 1
-image:
-  repository: grafana/alloy
-  tag: "v1.0.0"
+alloy:
+  # Clustering configuration
+  clustering:
+    enabled: false
+  
+  # Stability level
+  stabilityLevel: "generally-available"
+
+# Controller settings
+controller:
+  type: "daemonset"
+  
+# Service Account
 serviceAccount:
   create: true
   name: alloy-sa
-podAnnotations:
-  cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+
+# RBAC
+rbac:
+  create: true
+
+# Resources
 resources:
   requests:
     cpu: "250m"
@@ -14,112 +27,17 @@ resources:
   limits:
     cpu: "1000m"
     memory: "2Gi"
-    
-alloy:
-  configMap:
-    create: true
-    
-alloyConfig: |
-  // ===============================
-  // Kubernetes Pod Log Collection
-  // ===============================
-  discovery.kubernetes "pods" {
-    role = "pod"
-  }
-  
-  discovery.relabel "pod_logs" {
-    targets = discovery.kubernetes.pods.targets
-    
-    // Keep only running pods
-    rule {
-      source_labels = ["__meta_kubernetes_pod_phase"]
-      action        = "keep"
-      regex         = "Running"
-    }
-    
-    // ===== CRITICAL LABELS FOR FILTERING =====
-    
-    // Namespace label (MUST be present for filtering)
-    rule {
-      source_labels = ["__meta_kubernetes_namespace"]
-      target_label  = "namespace"
-      action        = "replace"
-    }
-    
-    // Pod name
-    rule {
-      source_labels = ["__meta_kubernetes_pod_name"]
-      target_label  = "pod"
-      action        = "replace"
-    }
-    
-    // Container name
-    rule {
-      source_labels = ["__meta_kubernetes_pod_container_name"]
-      target_label  = "container"
-      action        = "replace"
-    }
-    
-    // Node name
-    rule {
-      source_labels = ["__meta_kubernetes_pod_node_name"]
-      target_label  = "node"
-      action        = "replace"
-    }
-    
-    // App label (if exists)
-    rule {
-      source_labels = ["__meta_kubernetes_pod_label_app"]
-      target_label  = "app"
-      action        = "replace"
-      regex         = "(.+)"
-    }
-    
-    // Job (namespace/container combination)
-    rule {
-      source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_container_name"]
-      separator     = "/"
-      target_label  = "job"
-      action        = "replace"
-    }
-    
-    // ===== LOG FILE PATH =====
-    rule {
-      source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
-      separator     = "/"
-      target_label  = "__path__"
-      replacement   = "/var/log/pods/*$1/$2/*.log"
-      action        = "replace"
-    }
-  }
-  
-  // Loki source - file based
-  loki.source.file "pod_logs" {
-    targets    = discovery.relabel.pod_logs.output
-    forward_to = [loki.write.default.receiver]
-  }
-  
-  // Write to Loki
-  loki.write "default" {
-    endpoint {
-      url = "http://loki-gateway.observability.svc.cluster.local/loki/api/v1/push"
-    }
-    
-    external_labels = {
-      cluster = "production"
-    }
-  }
 
+# Pod annotations
+podAnnotations:
+  cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+
+# Service
 service:
   enabled: true
   type: ClusterIP
-  
-controller:
-  type: "daemonset"
-  
-rbac:
-  create: true
-  
+
+# Volumes for log collection
 extraVolumes:
   - name: varlog
     hostPath:
@@ -127,7 +45,7 @@ extraVolumes:
   - name: varlibdockercontainers
     hostPath:
       path: /var/lib/docker/containers
-      
+
 extraVolumeMounts:
   - name: varlog
     mountPath: /var/log
@@ -135,3 +53,95 @@ extraVolumeMounts:
   - name: varlibdockercontainers
     mountPath: /var/lib/docker/containers
     readOnly: true
+
+# THE CRITICAL PART - Configuration in the correct format
+configMap:
+  create: true
+  content: |
+    // ===============================
+    // Kubernetes Pod Log Collection
+    // ===============================
+    discovery.kubernetes "pods" {
+      role = "pod"
+    }
+    
+    discovery.relabel "pod_logs" {
+      targets = discovery.kubernetes.pods.targets
+      
+      // Keep only running pods
+      rule {
+        source_labels = ["__meta_kubernetes_pod_phase"]
+        action        = "keep"
+        regex         = "Running"
+      }
+      
+      // Namespace label (CRITICAL for filtering)
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        target_label  = "namespace"
+        action        = "replace"
+      }
+      
+      // Pod name
+      rule {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        target_label  = "pod"
+        action        = "replace"
+      }
+      
+      // Container name
+      rule {
+        source_labels = ["__meta_kubernetes_pod_container_name"]
+        target_label  = "container"
+        action        = "replace"
+      }
+      
+      // Node name
+      rule {
+        source_labels = ["__meta_kubernetes_pod_node_name"]
+        target_label  = "node"
+        action        = "replace"
+      }
+      
+      // App label (if exists)
+      rule {
+        source_labels = ["__meta_kubernetes_pod_label_app"]
+        target_label  = "app"
+        action        = "replace"
+        regex         = "(.+)"
+      }
+      
+      // Job (namespace/container combination)
+      rule {
+        source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_container_name"]
+        separator     = "/"
+        target_label  = "job"
+        action        = "replace"
+      }
+      
+      // Log file path
+      rule {
+        source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+        separator     = "/"
+        target_label  = "__path__"
+        replacement   = "/var/log/pods/*$1/$2/*.log"
+        action        = "replace"
+      }
+    }
+    
+    // File-based log scraping
+    loki.source.file "pod_logs" {
+      targets    = discovery.relabel.pod_logs.output
+      forward_to = [loki.write.default.receiver]
+    }
+    
+    // Write to Loki
+    loki.write "default" {
+      endpoint {
+        url = "http://loki-gateway.observability.svc.cluster.local/loki/api/v1/push"
+      }
+      
+      external_labels = {
+        cluster = "production"
+      }
+    }
