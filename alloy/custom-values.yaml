@@ -90,7 +90,7 @@ alloy:
         }
         
         external_labels = {
-          cluster = "production"
+          cluster = "production",
         }
       }
   
