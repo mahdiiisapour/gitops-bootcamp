@@ -1,5 +1,4 @@
 deploymentMode: SingleBinary
-
 loki:
   auth_enabled: false
   
@@ -60,11 +59,12 @@ loki:
     max_streams_per_user: 0  # 0 = unlimited
     max_global_streams_per_user: 0  # 0 = unlimited
     
-    # Query limits
+    # Query limits - MOVED query_timeout here
     max_chunks_per_query: 2000000
     max_query_length: 721h
     max_query_parallelism: 32
     max_entries_limit_per_query: 10000
+    query_timeout: 5m  # MOVED FROM querier section
     
     # Sample limits
     reject_old_samples: true
@@ -88,10 +88,9 @@ loki:
     cardinality_limit: 100000
     max_query_series: 10000
   
-  # Querier configuration
+  # Querier configuration - REMOVED query_timeout
   querier:
     max_concurrent: 20
-    query_timeout: 5m
   
   # Query scheduler
   query_scheduler:
@@ -171,10 +170,8 @@ gateway:
 # Disable distributed components
 write:
   replicas: 0
-
 read:
   replicas: 0
-
 backend:
   replicas: 0
 
@@ -198,7 +195,6 @@ ruler:
 # Disable caching
 chunksCache:
   enabled: false
-
 resultsCache:
   enabled: false
 
