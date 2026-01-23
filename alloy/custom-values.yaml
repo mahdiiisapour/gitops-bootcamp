@@ -1,24 +1,8 @@
-# Image configuration
-image:
-  repository: grafana/alloy
-  tag: "v1.0.0"
-  pullPolicy: IfNotPresent
+# Alloy Custom Values Configuration
+# Complete configuration file for Grafana Alloy Helm chart
 
-# Alloy configuration
 alloy:
-  # Stability level
-  stabilityLevel: "generally-available"
-
-  # Clustering (disabled for single instance)
-  clustering:
-    enabled: false
-
-  # Volume mounts - CRITICAL: Use built-in flags
-  mounts:
-    varlog: true                    # Mount /var/log
-    dockercontainers: true          # Mount /var/lib/docker/containers
-
-  # ConfigMap with Alloy configuration
+  # ConfigMap configuration - MUST be at this level
   configMap:
     create: true
     content: |
@@ -26,104 +10,106 @@ alloy:
       // Kubernetes Pod Log Collection
       // ===============================
       discovery.kubernetes "pods" {
-        role = "pod",
+        role = "pod"
       }
-
+      
       discovery.relabel "pod_logs" {
-        targets = discovery.kubernetes.pods.targets,
-
+        targets = discovery.kubernetes.pods.targets
+        
         // Keep only running pods
         rule {
-          source_labels = ["__meta_kubernetes_pod_phase"],
-          action        = "keep",
-          regex         = "Running",
+          source_labels = ["__meta_kubernetes_pod_phase"]
+          action        = "keep"
+          regex         = "Running"
         }
-
-        // Namespace label (CRITICAL for filtering in Grafana)
+        
+        // Namespace label (CRITICAL for filtering)
         rule {
-          source_labels = ["__meta_kubernetes_namespace"],
-          target_label  = "namespace",
-          action        = "replace",
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+          action        = "replace"
         }
-
+        
         // Pod name
         rule {
-          source_labels = ["__meta_kubernetes_pod_name"],
-          target_label  = "pod",
-          action        = "replace",
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+          action        = "replace"
         }
-
+        
         // Container name
         rule {
-          source_labels = ["__meta_kubernetes_pod_container_name"],
-          target_label  = "container",
-          action        = "replace",
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+          action        = "replace"
         }
-
+        
         // Node name
         rule {
-          source_labels = ["__meta_kubernetes_pod_node_name"],
-          target_label  = "node",
-          action        = "replace",
+          source_labels = ["__meta_kubernetes_pod_node_name"]
+          target_label  = "node"
+          action        = "replace"
         }
-
+        
         // App label (if exists)
         rule {
-          source_labels = ["__meta_kubernetes_pod_label_app"],
-          target_label  = "app",
-          action        = "replace",
-          regex         = "(.+)",
+          source_labels = ["__meta_kubernetes_pod_label_app"]
+          target_label  = "app"
+          action        = "replace"
+          regex         = "(.+)"
         }
-
+        
         // Job (namespace/container combination)
         rule {
-          source_labels = [
-            "__meta_kubernetes_namespace",
-            "__meta_kubernetes_pod_container_name",
-          ],
-          separator     = "/",
-          target_label  = "job",
-          action        = "replace",
+          source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_container_name"]
+          separator     = "/"
+          target_label  = "job"
+          action        = "replace"
         }
-
+        
         // Log file path
         rule {
-          source_labels = [
-            "__meta_kubernetes_pod_uid",
-            "__meta_kubernetes_pod_container_name",
-          ],
-          separator    = "/",
-          target_label = "__path__",
-          replacement  = "/var/log/pods/*$1/$2/*.log",
-          action       = "replace",
+          source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+          separator     = "/"
+          target_label  = "__path__"
+          replacement   = "/var/log/pods/*$1/$2/*.log"
+          action        = "replace"
         }
       }
-
+      
       // File-based log scraping
       loki.source.file "pod_logs" {
-        targets    = discovery.relabel.pod_logs.output,
-        forward_to = [loki.write.default.receiver],
+        targets    = discovery.relabel.pod_logs.output
+        forward_to = [loki.write.default.receiver]
       }
-
+      
       // Write to Loki
       loki.write "default" {
         endpoint {
-          url = "http://loki-gateway.observability.svc.cluster.local/loki/api/v1/push",
+          url = "http://loki-gateway.observability.svc.cluster.local/loki/api/v1/push"
         }
-
+        
         external_labels = {
-          cluster = "production",
+          cluster = "production"
         }
       }
-
-  # Resources
-  resources:
-    requests:
-      cpu: "250m"
-      memory: "512Mi"
-    limits:
-      cpu: "1000m"
-      memory: "2Gi"
+  
+  # Clustering configuration
+  clustering:
+    enabled: false
+  
+  # Stability level
+  stabilityLevel: "generally-available"
+  
+  # Storage path for WAL and other data
+  storagePath: /tmp/alloy
+  
+  # HTTP server configuration
+  enableHttpServerPort: true
+  listenAddr: 0.0.0.0
+  listenPort: 12345
+  listenScheme: HTTP
+  uiPathPrefix: /
 
 # Controller settings
 controller:
@@ -138,6 +124,15 @@ serviceAccount:
 rbac:
   create: true
 
+# Resources
+resources:
+  requests:
+    cpu: "250m"
+    memory: "512Mi"
+  limits:
+    cpu: "1000m"
+    memory: "2Gi"
+
 # Pod annotations
 podAnnotations:
   cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
@@ -146,3 +141,35 @@ podAnnotations:
 service:
   enabled: true
   type: ClusterIP
+
+# Volumes for log collection
+extraVolumes:
+  - name: varlog
+    hostPath:
+      path: /var/log
+  - name: varlibdockercontainers
+    hostPath:
+      path: /var/lib/docker/containers
+
+extraVolumeMounts:
+  - name: varlog
+    mountPath: /var/log
+    readOnly: true
+  - name: varlibdockercontainers
+    mountPath: /var/lib/docker/containers
+    readOnly: true
+
+# Probes configuration
+readinessProbe:
+  initialDelaySeconds: 10
+  timeoutSeconds: 1
+  periodSeconds: 10
+  successThreshold: 1
+  failureThreshold: 3
+
+livenessProbe:
+  initialDelaySeconds: 30
+  timeoutSeconds: 1
+  periodSeconds: 10
+  successThreshold: 1
+  failureThreshold: 3
