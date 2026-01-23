@@ -61,12 +61,15 @@ alloy:
           target_label  = "job"
         }
         
-        // FIXED: Correct log file path pattern
+        // FIXED: Correct log file path pattern for Kubernetes
+        // K8s path format: /var/log/pods/<namespace>_<pod-name>_<uid>/<container>/*.log
         rule {
-          source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
-          separator     = "_"
-          target_label  = "__path__"
-          replacement   = "/var/log/pods/$1/$2/*.log"
+          action       = "replace"
+          source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name", "__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+          separator    = "/"
+          regex        = "([^/]+)/([^/]+)/([^/]+)/([^/]+)"
+          replacement  = "/var/log/pods/$1_$2_$3/$4/*.log"
+          target_label = "__path__"
         }
       }
       
