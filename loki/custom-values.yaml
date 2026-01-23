@@ -87,6 +87,9 @@ loki:
     # Cardinality limits (set high for development)
     cardinality_limit: 100000
     max_query_series: 10000
+    
+    # Index all these labels for filtering
+    volume_enabled: true
   
   # Querier configuration - REMOVED query_timeout
   querier:
