@@ -76,7 +76,7 @@ alloyConfig: |
       target_label  = "job"
     }
 
-    // ✅ Correct Kubernetes container log path
+    // Kubernetes container log path
     rule {
       source_labels = [
         "__meta_kubernetes_pod_name",
@@ -89,8 +89,8 @@ alloyConfig: |
     }
   }
 
-  // Read logs and send directly to Loki
-  loki.source.kubernetes "pod_logs" {
+  // 🔑 FILE-BASED log scraping (required for labels)
+  loki.source.file "pod_logs" {
     targets    = discovery.relabel.pod_logs.output
     forward_to = [loki.write.default.receiver]
   }
