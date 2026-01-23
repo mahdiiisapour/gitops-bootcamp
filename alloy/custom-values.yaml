@@ -61,14 +61,20 @@ alloy:
           target_label  = "job"
         }
         
-        // FIXED: Correct log file path for Kubernetes
-        // Actual K8s path: /var/log/pods/<namespace>_<pod-name>_<uid>/<container>/*.log
+        // FIXED: Build the complete pod directory path
+        // Format: namespace_podname_uid
         rule {
-          source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name", "__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+          source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name", "__meta_kubernetes_pod_uid"]
+          separator     = "_"
+          target_label  = "__pod_dir__"
+        }
+        
+        // Now build the full log path using the pod directory
+        rule {
+          source_labels = ["__pod_dir__", "__meta_kubernetes_pod_container_name"]
           separator     = "/"
-          regex         = "([^/]+)/([^/]+)/([^/]+)/(.+)"
-          replacement   = "/var/log/pods/$1_$2_$3/$4/*.log"
           target_label  = "__path__"
+          replacement   = "/var/log/pods/$1/$2/*.log"
         }
       }
       
