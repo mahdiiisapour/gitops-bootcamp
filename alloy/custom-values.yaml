@@ -1,16 +1,12 @@
 replicaCount: 1
-
 image:
   repository: grafana/alloy
   tag: "v1.0.0"
-
 serviceAccount:
   create: true
   name: alloy-sa
-
 podAnnotations:
   cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
-
 resources:
   requests:
     cpu: "250m"
@@ -18,17 +14,23 @@ resources:
   limits:
     cpu: "1000m"
     memory: "2Gi"
-
 alloyConfig: |
   // Discover all pods in the cluster
   discovery.kubernetes "pods" {
     role = "pod"
   }
-
+  
   // Relabel to add metadata as labels
   discovery.relabel "pod_logs" {
     targets = discovery.kubernetes.pods.targets
-
+    
+    // Keep only running pods
+    rule {
+      source_labels = ["__meta_kubernetes_pod_phase"]
+      action        = "keep"
+      regex         = "Running"
+    }
+    
     // Namespace
     rule {
       source_labels = ["__meta_kubernetes_namespace"]
@@ -61,18 +63,43 @@ alloyConfig: |
     
     // Job
     rule {
-      source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name"]
+      source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_container_name"]
       separator     = "/"
       target_label  = "job"
     }
+    
+    // Ensure __path__ is set correctly
+    rule {
+      source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+      separator     = "/"
+      target_label  = "__path__"
+      replacement   = "/var/log/pods/*$1/*.log"
+    }
   }
-
+  
   // Read logs from discovered pods
   loki.source.kubernetes "pod_logs" {
     targets    = discovery.relabel.pod_logs.output
-    forward_to = [loki.write.default.receiver]
+    forward_to = [loki.process.add_labels.receiver]
   }
-
+  
+  // Process logs to ensure labels are preserved
+  loki.process "add_labels" {
+    forward_to = [loki.write.default.receiver]
+    
+    // Stage to keep all labels from discovery
+    stage.labels {
+      values = {
+        namespace = "",
+        pod       = "",
+        container = "",
+        node      = "",
+        app       = "",
+        job       = "",
+      }
+    }
+  }
+  
   // Write to Loki
   loki.write "default" {
     endpoint {
