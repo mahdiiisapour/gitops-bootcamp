@@ -121,7 +121,7 @@ controller:
 
 # RBAC permissions
 rbac:
-  create: false
+  create: true
 
 # Mount host log directories
 extraVolumes:
