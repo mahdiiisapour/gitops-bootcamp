@@ -67,10 +67,10 @@ alloy:
         // FIXED: Direct path construction - builds correct Kubernetes log paths
         // Kubernetes log structure: /var/log/pods/namespace_podname_uid/container/0.log
         rule {
-          source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name", "__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+          source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
           separator     = "/"
           target_label  = "__path__"
-          replacement   = "/var/log/pods/$1_$2_$3/$4/*.log"
+          replacement   = "/var/log/pods/*$1/$2/*.log"
         }
       }
       
