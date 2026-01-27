@@ -173,11 +173,7 @@ alloy:
       loki.write "default" {
         endpoint {
           url = "http://loki-gateway.observability.svc.cluster.local/loki/api/v1/push"
-          
-          // Retry configuration
-          min_backoff = "100ms"
-          max_backoff = "10s"
-          max_retries = 10
+        
           
           // Batch configuration for efficiency
           batch_wait = "1s"
