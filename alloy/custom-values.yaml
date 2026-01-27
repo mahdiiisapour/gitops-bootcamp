@@ -36,8 +36,13 @@ alloy:
         }
 
         rule {
-          source_labels = ["__meta_kubernetes_pod_name", "__meta_kubernetes_namespace", "__meta_kubernetes_pod_container_name"]
+          source_labels = [
+            "__meta_kubernetes_pod_name",
+            "__meta_kubernetes_namespace",
+            "__meta_kubernetes_pod_container_name",
+          ]
           separator     = "_"
+          regex         = "(.+)_(.+)_(.+)"
           target_label  = "__path__"
           replacement   = "/var/log/containers/$1_$2_$3-*.log"
         }
@@ -58,12 +63,11 @@ alloy:
         }
       }
 
-
-
   clustering:
     enabled: false
 
   stabilityLevel: "generally-available"
+
   storagePath: /tmp/alloy
   listenAddr: 0.0.0.0
   listenPort: 12345
@@ -76,22 +80,22 @@ alloy:
     extra: []
 
 controller:
-  type: "daemonset"
+  type: daemonset
 
 serviceAccount:
   create: true
-  name: alloy-sa
+  name: alloy
 
 rbac:
   create: true
 
 resources:
   requests:
-    cpu: "250m"
-    memory: "512Mi"
+    cpu: 250m
+    memory: 512Mi
   limits:
-    cpu: "1000m"
-    memory: "2Gi"
+    cpu: 1000m
+    memory: 2Gi
 
 podAnnotations:
   cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
