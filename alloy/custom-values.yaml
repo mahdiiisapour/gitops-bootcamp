@@ -6,7 +6,7 @@ alloy:
         role = "pod"
       }
 
-      discovery.relabel "pod_logs" {
+      discovery.relabel "container_logs" {
         targets = discovery.kubernetes.pods.targets
 
         rule {
@@ -36,27 +36,21 @@ alloy:
         }
 
         rule {
-          source_labels = ["__meta_kubernetes_pod_label_app"]
-          target_label  = "app"
-          regex         = "(.+)"
-        }
-
-        rule {
-          source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_container_name"]
+          source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name"]
           separator     = "/"
           target_label  = "job"
         }
 
         rule {
-          source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
-          separator     = "/"
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          regex         = "(.+)"
           target_label  = "__path__"
-          replacement   = "/var/log/pods/$1/$2/*.log"
+          replacement   = "/var/log/containers/*$1*.log"
         }
       }
 
-      loki.source.file "pod_logs" {
-        targets    = discovery.relabel.pod_logs.output
+      loki.source.file "container_logs" {
+        targets    = discovery.relabel.container_logs.output
         forward_to = [loki.write.default.receiver]
       }
 
@@ -69,6 +63,7 @@ alloy:
           cluster = "production",
         }
       }
+
 
   clustering:
     enabled: false
