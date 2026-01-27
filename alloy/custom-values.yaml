@@ -1,8 +1,8 @@
 # ============================================================================
-# ALLOY CONFIGURATION - KUBERNETES LOG COLLECTION
+# ALLOY CONFIGURATION - KUBERNETES LOG COLLECTION (CORRECTED)
 # ============================================================================
-# File: alloy-values.yaml
-# Purpose: Collect logs from all Kubernetes pods and ship to Loki
+# File: alloy-values-FIXED.yaml
+# This version fixes the path pattern to match actual Kubernetes log locations
 
 alloy:
   configMap:
@@ -53,12 +53,6 @@ alloy:
           target_label  = "container"
         }
         
-        // Extract container ID
-        rule {
-          source_labels = ["__meta_kubernetes_pod_container_id"]
-          target_label  = "container_id"
-        }
-        
         // Extract node name
         rule {
           source_labels = ["__meta_kubernetes_pod_node_name"]
@@ -79,28 +73,21 @@ alloy:
           regex         = "(.+)"
         }
         
-        // Extract pod UID
+        // FIXED: Use correct path pattern for Kubernetes logs
+        // This uses the actual /var/log/pods structure without the double underscores
         rule {
-          source_labels = ["__meta_kubernetes_pod_uid"]
-          target_label  = "__tmp_pod_uid"
+          source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+          separator     = "/"
+          target_label  = "__tmp_full_path"
+          replacement   = "${1}/${2}"
         }
         
-        // Construct log file path using the modern Kubernetes log structure
-        // Format: /var/log/pods/<namespace>_<pod-name>_<pod-uid>/<container-name>/*.log
+        // Set the final path using the namespace, pod name, and the temp path
         rule {
-          source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name", "__tmp_pod_uid", "__meta_kubernetes_pod_container_name"]
+          source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name", "__tmp_full_path"]
           separator     = "/"
           target_label  = "__path__"
-          replacement   = "/var/log/pods/${1}_${2}_${3}/${4}/*.log"
-        }
-        
-        // Also check legacy container log path as fallback
-        // Format: /var/log/containers/<pod-name>_<namespace>_<container-name>-<container-id>.log
-        rule {
-          source_labels = ["__meta_kubernetes_pod_name", "__meta_kubernetes_namespace", "__meta_kubernetes_pod_container_name"]
-          separator     = "_"
-          target_label  = "__path_legacy__"
-          replacement   = "/var/log/containers/${1}_${2}_${3}-*.log"
+          replacement   = "/var/log/pods/${1}_${2}_${3}/*.log"
         }
       }
 
@@ -111,7 +98,6 @@ alloy:
         forward_to = [loki.write.default.receiver]
         
         // Parse CRI (Container Runtime Interface) format logs
-        // This handles the timestamp and log level from container runtime
         stage.cri {}
         
         // Try to extract log level from the actual log message
@@ -123,23 +109,6 @@ alloy:
         stage.labels {
           values = {
             level = "extracted_level",
-          }
-        }
-        
-        // Extract JSON fields if the log is in JSON format
-        stage.json {
-          expressions = {
-            message   = "message",
-            timestamp = "timestamp",
-            severity  = "severity",
-          }
-        }
-        
-        // Set structured metadata (requires Loki 2.9+)
-        stage.structured_metadata {
-          values = {
-            trace_id = "trace_id",
-            span_id  = "span_id",
           }
         }
         
@@ -163,7 +132,7 @@ alloy:
         // Tail from the end of new files
         tail_from_end = false
         
-        // Encoding (useful for handling different log formats)
+        // Encoding
         encoding = "UTF-8"
       }
 
@@ -174,7 +143,6 @@ alloy:
         endpoint {
           url = "http://loki-gateway.observability.svc.cluster.local/loki/api/v1/push"
         
-        }
         
         // External labels applied to all logs
         external_labels = {
@@ -189,71 +157,53 @@ alloy:
     enabled: false
   
   stabilityLevel: "generally-available"
-  
-  # Storage for Alloy's internal state (positions, etc.)
   storagePath: /tmp/alloy
   
-  # HTTP server configuration
   listenAddr: 0.0.0.0
   listenPort: 12345
   listenScheme: HTTP
   uiPathPrefix: /
   
-  # Enable verbose logging for debugging (set to "info" in production)
-  extraArgs:
-    - --server.http.enable-pprof
-  
-  # Log level (debug, info, warn, error)
   logging:
     level: info
     format: logfmt
   
   # Mount points for log files
   mounts:
-    # Mount /var/log from host
     varlog: true
-    # Mount /var/lib/docker/containers for legacy log paths
     dockercontainers: true
-    # Additional custom mounts if needed
     extra: []
 
 # ========================================================================
 # CONTROLLER CONFIGURATION
 # ========================================================================
 controller:
-  # DaemonSet ensures one Alloy pod per node
   type: daemonset
   
-  # Update strategy
   updateStrategy:
     type: RollingUpdate
     rollingUpdate:
       maxUnavailable: 1
   
-  # Pod security context - run as root to read log files
+  # Run as root to read log files
   podSecurityContext:
     runAsUser: 0
     runAsGroup: 0
     fsGroup: 0
   
-  # Host networking (optional, can help with node-level logs)
   hostNetwork: false
   hostPID: false
-  
-  # DNS policy
   dnsPolicy: ClusterFirst
   
-  # Node selector (optional - deploy only on specific nodes)
   nodeSelector: {}
   
-  # Tolerations (allow scheduling on all nodes including control plane)
+  # Allow scheduling on all nodes
   tolerations:
     - effect: NoSchedule
       operator: Exists
     - effect: NoExecute
       operator: Exists
   
-  # Pod affinity/anti-affinity (optional)
   affinity: {}
 
 # ========================================================================
@@ -282,10 +232,7 @@ resources:
 # POD ANNOTATIONS
 # ========================================================================
 podAnnotations:
-  # Prevent cluster autoscaler from evicting Alloy pods
   cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
-  
-  # Prometheus scraping (if you use Prometheus)
   prometheus.io/scrape: "true"
   prometheus.io/port: "12345"
   prometheus.io/path: "/metrics"
@@ -300,40 +247,22 @@ service:
   annotations: {}
 
 # ========================================================================
-# INGRESS (Optional - for accessing Alloy UI externally)
+# INGRESS (Optional)
 # ========================================================================
 ingress:
   enabled: false
-  # Uncomment and configure if you want external access to Alloy UI
-  # className: nginx
-  # hosts:
-  #   - host: alloy.example.com
-  #     paths:
-  #       - path: /
-  #         pathType: Prefix
-  # tls: []
 
 # ========================================================================
-# PERSISTENCE (Optional - for Alloy's position files)
+# PERSISTENCE (Optional)
 # ========================================================================
-# By default, Alloy uses /tmp/alloy which is ephemeral
-# Enable this if you want to persist position tracking across pod restarts
 persistence:
   enabled: false
-  # storageClass: ""
-  # size: 1Gi
-  # accessModes:
-  #   - ReadWriteOnce
 
 # ========================================================================
 # MONITORING
 # ========================================================================
-# ServiceMonitor for Prometheus Operator (optional)
 serviceMonitor:
   enabled: false
-  # interval: 30s
-  # additionalLabels:
-  #   release: prometheus
 
 # ========================================================================
 # SECURITY
@@ -341,27 +270,10 @@ serviceMonitor:
 podSecurityPolicy:
   enabled: false
 
-# ========================================================================
-# PRIORITY CLASS (Optional - for critical workloads)
-# ========================================================================
 priorityClassName: ""
 
-# ========================================================================
-# EXTRA CONFIGURATION
-# ========================================================================
-# Environment variables
 env: []
-  # - name: EXAMPLE_ENV
-  #   value: "value"
-
-# Extra volumes
 extraVolumes: []
-
-# Extra volume mounts
 extraVolumeMounts: []
-
-# Init containers
 initContainers: []
-
-# Sidecar containers
 extraContainers: []
