@@ -36,16 +36,10 @@ alloy:
         }
 
         rule {
-          source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name"]
-          separator     = "/"
-          target_label  = "job"
-        }
-
-        rule {
-          source_labels = ["__meta_kubernetes_pod_container_name"]
-          regex         = "(.+)"
+          source_labels = ["__meta_kubernetes_pod_name", "__meta_kubernetes_namespace", "__meta_kubernetes_pod_container_name"]
+          separator     = "_"
           target_label  = "__path__"
-          replacement   = "/var/log/containers/*$1*.log"
+          replacement   = "/var/log/containers/$1_$2_$3-*.log"
         }
       }
 
@@ -63,6 +57,7 @@ alloy:
           cluster = "production",
         }
       }
+
 
 
   clustering:
