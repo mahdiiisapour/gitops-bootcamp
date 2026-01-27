@@ -47,7 +47,7 @@ alloy:
           target_label  = "job"
         }
         
-        # FIXED: Correct path pattern without double slashes
+        // FIXED: Correct path pattern without double slashes
         rule {
           source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
           separator     = "/"
