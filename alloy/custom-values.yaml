@@ -1,225 +1,90 @@
-# ============================================================================
-# ALLOY CONFIGURATION - KUBERNETES LOG COLLECTION (CORRECTED)
-# ============================================================================
-# File: alloy-values-FIXED.yaml
-# This version fixes the path pattern to match actual Kubernetes log locations
-
+# Clean Alloy Configuration - Minimal and Working
 alloy:
   configMap:
     create: true
     content: |
-      // ========================================================================
-      // KUBERNETES POD DISCOVERY
-      // ========================================================================
       discovery.kubernetes "pods" {
         role = "pod"
       }
 
-      // ========================================================================
-      // RELABELING - Extract metadata and construct log paths
-      // ========================================================================
       discovery.relabel "container_logs" {
         targets = discovery.kubernetes.pods.targets
         
-        // Only keep Running pods
         rule {
           source_labels = ["__meta_kubernetes_pod_phase"]
           action        = "keep"
           regex         = "Running"
         }
         
-        // Drop pods without container names
         rule {
           source_labels = ["__meta_kubernetes_pod_container_name"]
           action        = "drop"
           regex         = "^$"
         }
         
-        // Extract namespace
         rule {
           source_labels = ["__meta_kubernetes_namespace"]
           target_label  = "namespace"
         }
         
-        // Extract pod name
         rule {
           source_labels = ["__meta_kubernetes_pod_name"]
           target_label  = "pod"
         }
         
-        // Extract container name
         rule {
           source_labels = ["__meta_kubernetes_pod_container_name"]
           target_label  = "container"
         }
         
-        // Extract node name
         rule {
           source_labels = ["__meta_kubernetes_pod_node_name"]
           target_label  = "node"
         }
         
-        // Extract app label (if exists)
         rule {
-          source_labels = ["__meta_kubernetes_pod_label_app"]
-          target_label  = "app"
-          regex         = "(.+)"
-        }
-        
-        // Extract app.kubernetes.io/name label (if exists)
-        rule {
-          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
-          target_label  = "app"
-          regex         = "(.+)"
-        }
-        
-        // FIXED: Use correct path pattern for Kubernetes logs
-        // This uses the actual /var/log/pods structure without the double underscores
-        rule {
-          source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
-          separator     = "/"
-          target_label  = "__tmp_full_path"
-          replacement   = "${1}/${2}"
-        }
-        
-        // Set the final path using the namespace, pod name, and the temp path
-        rule {
-          source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name", "__tmp_full_path"]
+          source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name", "__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
           separator     = "/"
           target_label  = "__path__"
-          replacement   = "/var/log/pods/${1}_${2}_${3}/*.log"
+          replacement   = "/var/log/pods/${1}_${2}_${3}/${4}/*.log"
         }
       }
 
-      // ========================================================================
-      // LOG PROCESSING - Parse and enrich logs
-      // ========================================================================
-      loki.process "container_logs" {
-        forward_to = [loki.write.default.receiver]
-        
-        // Parse CRI (Container Runtime Interface) format logs
-        stage.cri {}
-        
-        // Try to extract log level from the actual log message
-        stage.regex {
-          expression = "(?i)(?P<extracted_level>DEBUG|INFO|WARN|WARNING|ERROR|ERR|FATAL|CRITICAL|TRACE)"
-        }
-        
-        // Add extracted level as a label (if found)
-        stage.labels {
-          values = {
-            level = "extracted_level",
-          }
-        }
-        
-        // Drop empty lines
-        stage.match {
-          selector = "{job=~\".+\"}"
-          
-          stage.drop {
-            expression = "^\\s*$"
-          }
-        }
-      }
-
-      // ========================================================================
-      // FILE SOURCE - Read logs from filesystem
-      // ========================================================================
       loki.source.file "container_logs" {
         targets    = discovery.relabel.container_logs.output
-        forward_to = [loki.process.container_logs.receiver]
-        
-        // Tail from the end of new files
-        tail_from_end = false
-        
-        // Encoding
-        encoding = "UTF-8"
+        forward_to = [loki.write.default.receiver]
       }
 
-      // ========================================================================
-      // LOKI WRITE - Send logs to Loki
-      // ========================================================================
       loki.write "default" {
         endpoint {
           url = "http://loki-gateway.observability.svc.cluster.local/loki/api/v1/push"
-        
-        
-        // External labels applied to all logs
+        }
         external_labels = {
           cluster = "production",
         }
       }
 
-  # ========================================================================
-  # ALLOY RUNTIME CONFIGURATION
-  # ========================================================================
   clustering:
     enabled: false
   
-  stabilityLevel: "generally-available"
-  storagePath: /tmp/alloy
-  
-  listenAddr: 0.0.0.0
-  listenPort: 12345
-  listenScheme: HTTP
-  uiPathPrefix: /
-  
-  logging:
-    level: info
-    format: logfmt
-  
-  # Mount points for log files
   mounts:
     varlog: true
-    dockercontainers: true
-    extra: []
 
-# ========================================================================
-# CONTROLLER CONFIGURATION
-# ========================================================================
 controller:
   type: daemonset
   
-  updateStrategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxUnavailable: 1
-  
-  # Run as root to read log files
   podSecurityContext:
     runAsUser: 0
     runAsGroup: 0
     fsGroup: 0
-  
-  hostNetwork: false
-  hostPID: false
-  dnsPolicy: ClusterFirst
-  
-  nodeSelector: {}
-  
-  # Allow scheduling on all nodes
-  tolerations:
-    - effect: NoSchedule
-      operator: Exists
-    - effect: NoExecute
-      operator: Exists
-  
-  affinity: {}
 
-# ========================================================================
-# SERVICE ACCOUNT & RBAC
-# ========================================================================
 serviceAccount:
   create: true
   name: alloy
-  annotations: {}
 
 rbac:
   create: true
 
-# ========================================================================
-# RESOURCE LIMITS
-# ========================================================================
 resources:
   requests:
     cpu: 250m
@@ -227,53 +92,3 @@ resources:
   limits:
     cpu: 1000m
     memory: 2Gi
-
-# ========================================================================
-# POD ANNOTATIONS
-# ========================================================================
-podAnnotations:
-  cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
-  prometheus.io/scrape: "true"
-  prometheus.io/port: "12345"
-  prometheus.io/path: "/metrics"
-
-# ========================================================================
-# SERVICE CONFIGURATION
-# ========================================================================
-service:
-  enabled: true
-  type: ClusterIP
-  port: 12345
-  annotations: {}
-
-# ========================================================================
-# INGRESS (Optional)
-# ========================================================================
-ingress:
-  enabled: false
-
-# ========================================================================
-# PERSISTENCE (Optional)
-# ========================================================================
-persistence:
-  enabled: false
-
-# ========================================================================
-# MONITORING
-# ========================================================================
-serviceMonitor:
-  enabled: false
-
-# ========================================================================
-# SECURITY
-# ========================================================================
-podSecurityPolicy:
-  enabled: false
-
-priorityClassName: ""
-
-env: []
-extraVolumes: []
-extraVolumeMounts: []
-initContainers: []
-extraContainers: []
