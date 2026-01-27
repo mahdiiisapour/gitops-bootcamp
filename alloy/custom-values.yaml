@@ -174,13 +174,6 @@ alloy:
         endpoint {
           url = "http://loki-gateway.observability.svc.cluster.local/loki/api/v1/push"
         
-          
-          // Batch configuration for efficiency
-          batch_wait = "1s"
-          batch_size = 1048576  // 1MB
-          
-          // Timeout
-          timeout = "10s"
         }
         
         // External labels applied to all logs
