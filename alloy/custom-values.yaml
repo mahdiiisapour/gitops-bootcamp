@@ -47,7 +47,6 @@ alloy:
           target_label  = "job"
         }
 
-        # FIXED: removed leading '*' to avoid invalid glob paths
         rule {
           source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
           separator     = "/"
