@@ -9,14 +9,12 @@ alloy:
       discovery.relabel "container_logs" {
         targets = discovery.kubernetes.pods.targets
 
-        # Only running pods
         rule {
           source_labels = ["__meta_kubernetes_pod_phase"]
           action        = "keep"
           regex         = "Running"
         }
 
-        # Drop entries without a container name (prevents -*.log)
         rule {
           source_labels = ["__meta_kubernetes_pod_container_name"]
           action        = "drop"
@@ -43,7 +41,6 @@ alloy:
           target_label  = "node"
         }
 
-        # SAFE glob that always exists
         rule {
           target_label = "__path__"
           replacement  = "/var/log/containers/*_${container}-*.log"
