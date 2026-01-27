@@ -1,93 +1,286 @@
+# ============================================================================
+# ALLOY CONFIGURATION - KUBERNETES LOG COLLECTION
+# ============================================================================
+# File: alloy-values.yaml
+# Purpose: Collect logs from all Kubernetes pods and ship to Loki
+
 alloy:
   configMap:
     create: true
     content: |
+      // ========================================================================
+      // KUBERNETES POD DISCOVERY
+      // ========================================================================
       discovery.kubernetes "pods" {
         role = "pod"
       }
 
+      // ========================================================================
+      // RELABELING - Extract metadata and construct log paths
+      // ========================================================================
       discovery.relabel "container_logs" {
         targets = discovery.kubernetes.pods.targets
-
+        
+        // Only keep Running pods
         rule {
           source_labels = ["__meta_kubernetes_pod_phase"]
           action        = "keep"
           regex         = "Running"
         }
-
+        
+        // Drop pods without container names
         rule {
           source_labels = ["__meta_kubernetes_pod_container_name"]
           action        = "drop"
           regex         = "^$"
         }
-
+        
+        // Extract namespace
         rule {
           source_labels = ["__meta_kubernetes_namespace"]
           target_label  = "namespace"
         }
-
+        
+        // Extract pod name
         rule {
           source_labels = ["__meta_kubernetes_pod_name"]
           target_label  = "pod"
         }
-
+        
+        // Extract container name
         rule {
           source_labels = ["__meta_kubernetes_pod_container_name"]
           target_label  = "container"
         }
-
+        
+        // Extract container ID
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_id"]
+          target_label  = "container_id"
+        }
+        
+        // Extract node name
         rule {
           source_labels = ["__meta_kubernetes_pod_node_name"]
           target_label  = "node"
         }
-
+        
+        // Extract app label (if exists)
         rule {
-          target_label = "__path__"
-          replacement  = "/var/log/containers/*_${container}-*.log"
+          source_labels = ["__meta_kubernetes_pod_label_app"]
+          target_label  = "app"
+          regex         = "(.+)"
+        }
+        
+        // Extract app.kubernetes.io/name label (if exists)
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+          target_label  = "app"
+          regex         = "(.+)"
+        }
+        
+        // Extract pod UID
+        rule {
+          source_labels = ["__meta_kubernetes_pod_uid"]
+          target_label  = "__tmp_pod_uid"
+        }
+        
+        // Construct log file path using the modern Kubernetes log structure
+        // Format: /var/log/pods/<namespace>_<pod-name>_<pod-uid>/<container-name>/*.log
+        rule {
+          source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name", "__tmp_pod_uid", "__meta_kubernetes_pod_container_name"]
+          separator     = "/"
+          target_label  = "__path__"
+          replacement   = "/var/log/pods/${1}_${2}_${3}/${4}/*.log"
+        }
+        
+        // Also check legacy container log path as fallback
+        // Format: /var/log/containers/<pod-name>_<namespace>_<container-name>-<container-id>.log
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name", "__meta_kubernetes_namespace", "__meta_kubernetes_pod_container_name"]
+          separator     = "_"
+          target_label  = "__path_legacy__"
+          replacement   = "/var/log/containers/${1}_${2}_${3}-*.log"
         }
       }
 
-      loki.source.file "container_logs" {
-        targets    = discovery.relabel.container_logs.output
+      // ========================================================================
+      // LOG PROCESSING - Parse and enrich logs
+      // ========================================================================
+      loki.process "container_logs" {
         forward_to = [loki.write.default.receiver]
+        
+        // Parse CRI (Container Runtime Interface) format logs
+        // This handles the timestamp and log level from container runtime
+        stage.cri {}
+        
+        // Try to extract log level from the actual log message
+        stage.regex {
+          expression = "(?i)(?P<extracted_level>DEBUG|INFO|WARN|WARNING|ERROR|ERR|FATAL|CRITICAL|TRACE)"
+        }
+        
+        // Add extracted level as a label (if found)
+        stage.labels {
+          values = {
+            level = "extracted_level",
+          }
+        }
+        
+        // Extract JSON fields if the log is in JSON format
+        stage.json {
+          expressions = {
+            message   = "message",
+            timestamp = "timestamp",
+            severity  = "severity",
+          }
+        }
+        
+        // Set structured metadata (requires Loki 2.9+)
+        stage.structured_metadata {
+          values = {
+            trace_id = "trace_id",
+            span_id  = "span_id",
+          }
+        }
+        
+        // Drop empty lines
+        stage.match {
+          selector = "{job=~\".+\"}"
+          
+          stage.drop {
+            expression = "^\\s*$"
+          }
+        }
       }
 
+      // ========================================================================
+      // FILE SOURCE - Read logs from filesystem
+      // ========================================================================
+      loki.source.file "container_logs" {
+        targets    = discovery.relabel.container_logs.output
+        forward_to = [loki.process.container_logs.receiver]
+        
+        // Tail from the end of new files
+        tail_from_end = false
+        
+        // Encoding (useful for handling different log formats)
+        encoding = "UTF-8"
+      }
+
+      // ========================================================================
+      // LOKI WRITE - Send logs to Loki
+      // ========================================================================
       loki.write "default" {
         endpoint {
           url = "http://loki-gateway.observability.svc.cluster.local/loki/api/v1/push"
+          
+          // Retry configuration
+          min_backoff = "100ms"
+          max_backoff = "10s"
+          max_retries = 10
+          
+          // Batch configuration for efficiency
+          batch_wait = "1s"
+          batch_size = 1048576  // 1MB
+          
+          // Timeout
+          timeout = "10s"
         }
-
+        
+        // External labels applied to all logs
         external_labels = {
           cluster = "production",
         }
       }
 
+  # ========================================================================
+  # ALLOY RUNTIME CONFIGURATION
+  # ========================================================================
   clustering:
     enabled: false
-
+  
   stabilityLevel: "generally-available"
-
+  
+  # Storage for Alloy's internal state (positions, etc.)
   storagePath: /tmp/alloy
+  
+  # HTTP server configuration
   listenAddr: 0.0.0.0
   listenPort: 12345
   listenScheme: HTTP
   uiPathPrefix: /
-
+  
+  # Enable verbose logging for debugging (set to "info" in production)
+  extraArgs:
+    - --server.http.enable-pprof
+  
+  # Log level (debug, info, warn, error)
+  logging:
+    level: info
+    format: logfmt
+  
+  # Mount points for log files
   mounts:
+    # Mount /var/log from host
     varlog: true
+    # Mount /var/lib/docker/containers for legacy log paths
     dockercontainers: true
+    # Additional custom mounts if needed
     extra: []
 
+# ========================================================================
+# CONTROLLER CONFIGURATION
+# ========================================================================
 controller:
+  # DaemonSet ensures one Alloy pod per node
   type: daemonset
+  
+  # Update strategy
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  
+  # Pod security context - run as root to read log files
+  podSecurityContext:
+    runAsUser: 0
+    runAsGroup: 0
+    fsGroup: 0
+  
+  # Host networking (optional, can help with node-level logs)
+  hostNetwork: false
+  hostPID: false
+  
+  # DNS policy
+  dnsPolicy: ClusterFirst
+  
+  # Node selector (optional - deploy only on specific nodes)
+  nodeSelector: {}
+  
+  # Tolerations (allow scheduling on all nodes including control plane)
+  tolerations:
+    - effect: NoSchedule
+      operator: Exists
+    - effect: NoExecute
+      operator: Exists
+  
+  # Pod affinity/anti-affinity (optional)
+  affinity: {}
 
+# ========================================================================
+# SERVICE ACCOUNT & RBAC
+# ========================================================================
 serviceAccount:
   create: true
   name: alloy
+  annotations: {}
 
 rbac:
   create: true
 
+# ========================================================================
+# RESOURCE LIMITS
+# ========================================================================
 resources:
   requests:
     cpu: 250m
@@ -96,9 +289,90 @@ resources:
     cpu: 1000m
     memory: 2Gi
 
+# ========================================================================
+# POD ANNOTATIONS
+# ========================================================================
 podAnnotations:
+  # Prevent cluster autoscaler from evicting Alloy pods
   cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+  
+  # Prometheus scraping (if you use Prometheus)
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "12345"
+  prometheus.io/path: "/metrics"
 
+# ========================================================================
+# SERVICE CONFIGURATION
+# ========================================================================
 service:
   enabled: true
   type: ClusterIP
+  port: 12345
+  annotations: {}
+
+# ========================================================================
+# INGRESS (Optional - for accessing Alloy UI externally)
+# ========================================================================
+ingress:
+  enabled: false
+  # Uncomment and configure if you want external access to Alloy UI
+  # className: nginx
+  # hosts:
+  #   - host: alloy.example.com
+  #     paths:
+  #       - path: /
+  #         pathType: Prefix
+  # tls: []
+
+# ========================================================================
+# PERSISTENCE (Optional - for Alloy's position files)
+# ========================================================================
+# By default, Alloy uses /tmp/alloy which is ephemeral
+# Enable this if you want to persist position tracking across pod restarts
+persistence:
+  enabled: false
+  # storageClass: ""
+  # size: 1Gi
+  # accessModes:
+  #   - ReadWriteOnce
+
+# ========================================================================
+# MONITORING
+# ========================================================================
+# ServiceMonitor for Prometheus Operator (optional)
+serviceMonitor:
+  enabled: false
+  # interval: 30s
+  # additionalLabels:
+  #   release: prometheus
+
+# ========================================================================
+# SECURITY
+# ========================================================================
+podSecurityPolicy:
+  enabled: false
+
+# ========================================================================
+# PRIORITY CLASS (Optional - for critical workloads)
+# ========================================================================
+priorityClassName: ""
+
+# ========================================================================
+# EXTRA CONFIGURATION
+# ========================================================================
+# Environment variables
+env: []
+  # - name: EXAMPLE_ENV
+  #   value: "value"
+
+# Extra volumes
+extraVolumes: []
+
+# Extra volume mounts
+extraVolumeMounts: []
+
+# Init containers
+initContainers: []
+
+# Sidecar containers
+extraContainers: []
