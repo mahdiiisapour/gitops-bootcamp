@@ -13,7 +13,7 @@ alloy:
         rule {
           source_labels = ["__meta_kubernetes_pod_phase"]
           action        = "keep"
-          regex         = "Running"
+          regex         = "Running|Pending|Failed|Succeeded"
         }
         
         rule {
