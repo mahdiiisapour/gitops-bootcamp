@@ -1,14 +1,6 @@
 # postgres.yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: keycloak-initial-admin
-  namespace: keycloak
-type: kubernetes.io/basic-auth
-stringData:
-  username: admin
-  password: Helldiver1234
----
+# NOTE: keycloak-initial-admin secret is intentionally NOT defined here.
+# The Keycloak operator creates and owns it. startup.sh patches in the desired credentials after deployment.
 apiVersion: v1
 kind: Secret
 metadata:

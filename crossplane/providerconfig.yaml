@@ -1,0 +1,14 @@
+apiVersion: vault.upbound.io/v1beta1
+kind: ProviderConfig
+metadata:
+  name: vault-provider-config
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  address: https://vault.helldiverslab.uk   # your Vault address
+  credentials:
+    source: Secret
+    secretRef:
+      namespace: crossplane-system
+      name: vault-credentials
+      key: token
