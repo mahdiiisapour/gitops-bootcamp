@@ -7,9 +7,9 @@ metadata:
     argocd.argoproj.io/sync-wave: "2"
 spec:
   parentRefs:
-    - name: traefik-gateway
-      namespace: traefik
-      sectionName: websecure
+    - name: kgateway-gw
+      namespace: kgateway-system
+      sectionName: https
   hostnames:
     - "keycloak.helldiverslab.uk"
   rules:
@@ -19,7 +19,7 @@ spec:
             value: /
       backendRefs:
         - name: keycloak-service
-          port: 8080        # <-- was 80, keycloak listens on 8080
+          port: 8080
           weight: 100
 ---
 apiVersion: gateway.networking.k8s.io/v1
@@ -31,9 +31,9 @@ metadata:
     argocd.argoproj.io/sync-wave: "2"
 spec:
   parentRefs:
-    - name: traefik-gateway
-      namespace: traefik
-      sectionName: web
+    - name: kgateway-gw
+      namespace: kgateway-system
+      sectionName: http
   hostnames:
     - "keycloak.helldiverslab.uk"
   rules:
