@@ -4,7 +4,7 @@ metadata:
   name: keycloak-https
   namespace: keycloak
   annotations:
-    argocd.argoproj.io/sync-wave: "3"
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   parentRefs:
     - name: traefik-gateway
@@ -28,7 +28,7 @@ metadata:
   name: keycloak-http-redirect
   namespace: keycloak
   annotations:
-    argocd.argoproj.io/sync-wave: "3"
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   parentRefs:
     - name: traefik-gateway

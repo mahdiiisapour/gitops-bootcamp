@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak-operator
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: keycloak-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak-operator
+  template:
+    metadata:
+      labels:
+        app: keycloak-operator
+    spec:
+      serviceAccountName: keycloak-operator
+      containers:
+        - name: keycloak-operator
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: KUBERNETES_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: WATCH_NAMESPACE
+              value: {{ default .Release.Namespace .Values.watchNamespace | quote }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

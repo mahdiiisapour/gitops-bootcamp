@@ -1,0 +1,15 @@
+image:
+  repository: quay.io/keycloak/keycloak-operator
+  tag: "26.1.4"
+  pullPolicy: IfNotPresent
+
+# Namespace the operator watches. Defaults to the release namespace (namespace-scoped).
+watchNamespace: ""
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 96Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

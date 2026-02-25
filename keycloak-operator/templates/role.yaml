@@ -1,0 +1,27 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: keycloak-operator-role
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services", "secrets", "configmaps", "persistentvolumeclaims", "pods", "events"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["k8s.keycloak.org"]
+    resources:
+      - keycloaks
+      - keycloaks/status
+      - keycloaks/finalizers
+      - keycloakrealmimports
+      - keycloakrealmimports/status
+      - keycloakrealmimports/finalizers
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
