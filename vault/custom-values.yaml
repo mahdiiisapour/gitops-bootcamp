@@ -6,7 +6,7 @@ ui:
 
 server:
   ingress:
-    enabled: false   # using HTTPRoute via Traefik Gateway instead
+    enabled: false   # using HTTPRoute via kgateway instead
 
   standalone:
     enabled: true

@@ -5,9 +5,9 @@ metadata:
   namespace: vault
 spec:
   parentRefs:
-    - name: traefik-gateway
-      namespace: traefik
-      sectionName: websecure
+    - name: kgateway-gw
+      namespace: kgateway-system
+      sectionName: https
   hostnames:
     - "vault.helldiverslab.uk"
   rules:
@@ -27,9 +27,9 @@ metadata:
   namespace: vault
 spec:
   parentRefs:
-    - name: traefik-gateway
-      namespace: traefik
-      sectionName: web
+    - name: kgateway-gw
+      namespace: kgateway-system
+      sectionName: http
   hostnames:
     - "vault.helldiverslab.uk"
   rules:
