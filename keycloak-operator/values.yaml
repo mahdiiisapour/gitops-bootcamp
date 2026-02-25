@@ -1,6 +1,6 @@
 image:
   repository: quay.io/keycloak/keycloak-operator
-  tag: "26.1.4"
+  tag: "26.5.4"
   pullPolicy: IfNotPresent
 
 # Namespace the operator watches. Defaults to the release namespace (namespace-scoped).

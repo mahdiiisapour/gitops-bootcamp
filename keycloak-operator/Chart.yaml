@@ -3,4 +3,4 @@ name: keycloak-operator
 description: Helm chart for the Keycloak Operator (vanilla Kubernetes, no OLM)
 type: application
 version: 0.1.0
-appVersion: "26.1.4"
+appVersion: "26.5.4"
